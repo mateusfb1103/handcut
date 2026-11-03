@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import subprocess
@@ -16,14 +17,44 @@ from werkzeug.utils import secure_filename
 
 
 ROOT = Path(__file__).resolve().parent
+# Recursos do programa (templates, static, vendor): na versão empacotada ficam dentro do pacote.
+RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", ROOT))
+FROZEN = bool(getattr(sys, "frozen", False))
 DOWNLOAD_MAX_HEIGHT = 480  # qualidade máxima do download do YouTube (usada só para marcar os lances)
-MEDIA_DIR = ROOT / "media"
-EXPORT_DIR = ROOT / "exports"
-TEMP_DIR = ROOT / "temp"
-for directory in (MEDIA_DIR, EXPORT_DIR, TEMP_DIR):
-    directory.mkdir(exist_ok=True)
 
-app = Flask(__name__)
+
+def default_data_dir() -> Path:
+    """Pasta onde ficam vídeos baixados, exportações e temporários.
+
+    HANDCUT_DATA_DIR (variável de ambiente) tem prioridade. Na versão empacotada é a pasta
+    Videos/Handcut do usuário. Com `python app.py` continua sendo a pasta do projeto.
+    """
+    custom = os.environ.get("HANDCUT_DATA_DIR")
+    if custom:
+        return Path(custom).expanduser()
+    if FROZEN:
+        return Path.home() / "Videos" / "Handcut"
+    return ROOT
+
+
+DATA_DIR = default_data_dir()
+MEDIA_DIR = DATA_DIR / "media"
+EXPORT_DIR = DATA_DIR / "exports"
+TEMP_DIR = DATA_DIR / "temp"
+for directory in (MEDIA_DIR, EXPORT_DIR, TEMP_DIR):
+    directory.mkdir(parents=True, exist_ok=True)
+
+# ffmpeg, ffprobe e deno ficam na pasta "vendor" do pacote. Colocá-la no começo do PATH faz o
+# app e o yt-dlp acharem as ferramentas sem configuração.
+TOOLS_DIR = Path(os.environ.get("HANDCUT_TOOLS_DIR") or RESOURCE_DIR / "vendor")
+if TOOLS_DIR.is_dir():
+    os.environ["PATH"] = str(TOOLS_DIR) + os.pathsep + os.environ.get("PATH", "")
+# Sem isso, cada chamada ao ffmpeg/yt-dlp abriria uma janela de terminal no app empacotado.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+LOG_FILE = DATA_DIR / "handcut.log"
+
+app = Flask(__name__, template_folder=str(RESOURCE_DIR / "templates"),
+            static_folder=str(RESOURCE_DIR / "static"))
 app.config["MAX_CONTENT_LENGTH"] = 30 * 1024 * 1024 * 1024
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
@@ -33,11 +64,12 @@ active_media: dict[str, Path] = {}
 media_sources: dict[str, dict] = {}
 MAX_REMOTE_HEIGHT = 1080
 DOWNLOAD_TIMEOUT_SECONDS = 2 * 60 * 60
-PROGRESS_LOG_INTERVAL_SECONDS = 30 
+PROGRESS_LOG_INTERVAL_SECONDS = 30  # how often a long export prints its speed in the terminal
 
 
 def run(command: list[str], *, timeout: int | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=True)
+    return subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=True,
+                          creationflags=NO_WINDOW)
 
 
 def probe(path: Path) -> dict:
@@ -75,6 +107,9 @@ def run_download_command(job_id: str, command: list[str]) -> None:
         encoding="utf-8",
         errors="replace",
         bufsize=1,
+        creationflags=NO_WINDOW,
+        # O yt-dlp escreveria acentos na codificação do Windows (cp1252) e o app os leria como "�".
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
     )
     output: queue.Queue[str | None] = queue.Queue()
 
@@ -105,12 +140,54 @@ def run_download_command(job_id: str, command: list[str]) -> None:
             continue
         recent_lines.append(line)
         recent_lines = recent_lines[-30:]
+        # yt-dlp writes progress using carriage returns or separate lines. With
+        # --newline each update can be shown directly by the browser's polling UI.
         finish_job(job_id, message=line[:240])
 
     return_code = process.wait()
     reader.join(timeout=1)
     if return_code:
         raise RuntimeError("\n".join(recent_lines) or f"yt-dlp encerrou com código {return_code}.")
+
+
+def ytdlp_prefix() -> list[str]:
+    """Comando base do yt-dlp.
+
+    Prefere o yt-dlp(.exe) da pasta de dados do usuário, que pode ser atualizado pelo botão
+    "Atualizar yt-dlp"; ele é copiado do pacote (vendor) na primeira vez. Sem ele, usa o
+    módulo Python do ambiente (modo de desenvolvimento).
+    """
+    name = "yt-dlp.exe" if os.name == "nt" else "yt-dlp"
+    bundled, local = TOOLS_DIR / name, DATA_DIR / "bin" / name
+    if bundled.exists() and not local.exists():
+        local.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(bundled, local)
+    return [str(local)] if local.exists() else [sys.executable, "-m", "yt_dlp"]
+
+
+def ytdlp_version() -> str:
+    try:
+        return run(ytdlp_prefix() + ["--version"], timeout=60).stdout.strip() or "desconhecida"
+    except Exception:
+        return "desconhecida"
+
+
+def update_ytdlp_worker(job_id: str) -> None:
+    try:
+        prefix = ytdlp_prefix()
+        if prefix[0] == sys.executable:  # modo de desenvolvimento: atualiza pelo pip
+            command = [sys.executable, "-m", "pip", "install", "-U", "yt-dlp[default]"]
+        else:
+            command = prefix + ["-U"]
+        run_download_command(job_id, command)
+        version = ytdlp_version()
+        finish_job(job_id, status="done", message=f"yt-dlp atualizado. Versão instalada: {version}.",
+                   version=version)
+    except (RuntimeError, TimeoutError) as exc:
+        finish_job(job_id, status="error", message="Não consegui atualizar o yt-dlp.",
+                   detail=str(exc).strip()[-600:])
+    except Exception as exc:
+        finish_job(job_id, status="error", message=str(exc))
 
 
 def best_available_height(info_files, fallback: int) -> int:
@@ -132,7 +209,7 @@ def download_sections(job_id: str, url: str, plan: list[tuple[int, float, float]
                       work_dir: Path) -> dict[int, Path]:
     """Baixa do YouTube só os trechos do plano, em até `height` p. Devolve {índice do lance: arquivo}."""
     output_template = str(work_dir / "sec-%(section_start)010.3f.%(ext)s")
-    command = [sys.executable, "-m", "yt_dlp",
+    command = ytdlp_prefix() + [
                "--no-playlist", "--newline", "--retries", "3", "--fragment-retries", "3",
                "--extractor-retries", "2", "--socket-timeout", "30", "-f",
                f"bv*[vcodec^=avc1][height<={height}]/bv*[height<={height}]",
@@ -158,7 +235,9 @@ def download_sections(job_id: str, url: str, plan: list[tuple[int, float, float]
 
 def download_worker(job_id: str, url: str) -> None:
     try:
-        prefix = [sys.executable, "-m", "yt_dlp"]
+        # Use the same interpreter as the running app so yt-dlp and its EJS
+        # companion package come from the environment installed by requirements.txt.
+        prefix = ytdlp_prefix()
         # Nome só com ASCII (sem o título): acentos no caminho quebravam a junção no Windows.
         output_template = str(MEDIA_DIR / f"download-{job_id}-%(id)s.%(ext)s")
         # Só vídeo (sem áudio), no máximo 480p: download e edição mais rápidos.
@@ -211,7 +290,93 @@ def download_worker(job_id: str, url: str) -> None:
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", data_dir=str(DATA_DIR))
+
+
+@app.post("/api/open-path")
+def open_path():
+    """Abre um vídeo do computador onde ele está, sem copiar (usado pelo seletor nativo da janela)."""
+    raw = str((request.json or {}).get("path", "")).strip().strip('"')
+    path = Path(raw)
+    if not raw or not path.is_absolute() or not path.is_file():
+        return jsonify(error="Não encontrei esse arquivo no computador."), 400
+    if path.suffix.lower() not in {".mp4", ".webm"}:
+        return jsonify(error="Formato não suportado. Use .mp4 ou .webm."), 400
+    try:
+        info = probe(path)
+    except Exception as exc:
+        return jsonify(error=f"Não consegui abrir esse vídeo: {exc}"), 400
+    media_id = uuid.uuid4().hex
+    active_media[media_id] = path
+    return jsonify(media_id=media_id, name=path.name, **info)
+
+
+def tree_size(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+
+
+def format_size(size: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}".replace(".", ",")
+        size /= 1024
+
+
+@app.get("/api/maintenance")
+def maintenance():
+    sizes = {name: sum(tree_size(item) for item in folder.iterdir())
+             for name, folder in (("media", MEDIA_DIR), ("exports", EXPORT_DIR), ("temp", TEMP_DIR))}
+    return jsonify(ytdlp_version=ytdlp_version(), data_dir=str(DATA_DIR),
+                   used=format_size(sum(sizes.values())), **sizes)
+
+
+@app.post("/api/update-ytdlp")
+def update_ytdlp():
+    job_id = add_job("update")
+    threading.Thread(target=update_ytdlp_worker, args=(job_id,), daemon=True).start()
+    return jsonify(job_id=job_id), 202
+
+
+@app.post("/api/cleanup")
+def cleanup():
+    """Apaga temporários, vídeos baixados (menos o que está aberto) e vídeos exportados."""
+    keep_path = active_media.get((request.json or {}).get("keep_media_id"))
+    with jobs_lock:
+        running = [job for job in jobs.values() if job.get("status") == "processing"]
+    busy_prefixes = tuple(f"download-{job['id']}-" for job in running if job["kind"] == "download")
+    busy_dirs = {job["id"] for job in running if job["kind"] == "export"}
+    busy_exports = tuple(f"lances-{job_id[:8]}" for job_id in busy_dirs)  # exportação em andamento
+    freed = removed = 0
+
+    def delete(item: Path) -> None:
+        nonlocal freed, removed
+        try:
+            size = tree_size(item)
+            shutil.rmtree(item) if item.is_dir() else item.unlink()
+            freed, removed = freed + size, removed + 1
+        except OSError:
+            pass  # arquivo em uso (comum no Windows): fica para a próxima limpeza
+
+    for item in list(TEMP_DIR.iterdir()):
+        if item.name not in busy_dirs:
+            delete(item)
+    for item in list(MEDIA_DIR.iterdir()):
+        if item.name.startswith(busy_prefixes) and busy_prefixes:
+            continue
+        if keep_path and item.name.startswith(keep_path.stem) and keep_path.parent == MEDIA_DIR:
+            continue
+        delete(item)
+        for media_id, path in list(active_media.items()):
+            if path == item:
+                active_media.pop(media_id, None)
+                media_sources.pop(media_id, None)
+    for item in list(EXPORT_DIR.iterdir()):
+        if busy_exports and item.name.startswith(busy_exports):
+            continue
+        delete(item)
+    return jsonify(removed=removed, freed=format_size(freed))
 
 
 @app.post("/api/upload")
@@ -271,8 +436,16 @@ def fmt_time(seconds: float) -> str:
 
 
 def export_log(job_id: str, text: str) -> None:
-    """Diagnostic line printed in the terminal that runs `python app.py`."""
-    print(f"[export {job_id[:8]}] {text}", flush=True)
+    """Linha de diagnóstico no terminal (python app.py) e no arquivo handcut.log da pasta de dados."""
+    line = f"[export {job_id[:8]}] {text}"
+    print(line, flush=True)
+    try:
+        if LOG_FILE.exists() and LOG_FILE.stat().st_size > 2_000_000:
+            LOG_FILE.write_text("", encoding="utf-8")
+        with LOG_FILE.open("a", encoding="utf-8") as handle:
+            handle.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+    except OSError:
+        pass
 
 
 def run_ffmpeg(command: list[str], *, job_id: str, content_seconds: float, base_done: float,
@@ -287,7 +460,7 @@ def run_ffmpeg(command: list[str], *, job_id: str, content_seconds: float, base_
     started = time.perf_counter()
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", errors="replace",
+        text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW,
     )
     error_lines: list[str] = []
 
@@ -308,7 +481,7 @@ def run_ffmpeg(command: list[str], *, job_id: str, content_seconds: float, base_
         key, _, value = line.strip().partition("=")
         if key not in {"out_time_us", "out_time_ms"} or not value.lstrip("-").isdigit():
             continue
-        position = max(0.0, int(value) / 1_000_000)
+        position = max(0.0, int(value) / 1_000_000)  # both keys are in microseconds
         done = min(base_done + position, total_content)
         finish_job(job_id, message=f"Processando {label}… {fmt_time(done)} de {fmt_time(total_content)}",
                    progress=round(done / total_content * 90))
@@ -385,7 +558,7 @@ def export_worker(job_id: str, media_path: Path, segments: list[dict], margin: f
                                f"({(end - start) / max(elapsed, 0.001):.1f}x)")
         concat_started = time.perf_counter()
         list_file = work_dir / "concat.txt"
-        list_file.write_text("".join(f"file '{path.as_posix()}'\n" for path in segment_paths), encoding="utf-8")
+        list_file.write_text("".join(f"file '{path.name}'\n" for path in segment_paths), encoding="utf-8")
         output = EXPORT_DIR / f"lances-{job_id[:8]}.mp4"
         finish_job(job_id, message="Juntando os lances…", progress=95)
         run([

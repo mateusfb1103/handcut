@@ -1,0 +1,21 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Dados locais do aplicativo
+media/
+exports/
+temp/
+
+# Artefatos de compilação
+build/
+dist/
+
+# IDEs
+.vscode/
+.idea/
+
+vendor/
+handcut.log
