@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Editor de Lances</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand-mark">EL</div>
+        <div>
+          <p class="eyebrow">HANDEBOL · FASE 1</p>
+          <h1>Editor de Lances</h1>
+        </div>
+        <span class="local-badge"><i></i> Processamento local</span>
+      </header>
+
+      <section class="panel source-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">01 / VÍDEO</p>
+            <h2>Escolha a gravação</h2>
+          </div>
+          <span class="step-number">01</span>
+        </div>
+        <div class="source-grid">
+          <form id="upload-form" class="source-card">
+            <div class="source-icon">↑</div>
+            <h3>Arquivo do computador</h3>
+            <p>Selecione um vídeo MP4 ou WEBM.</p>
+            <label class="file-button"
+              >Selecionar arquivo<input
+                id="video-file"
+                type="file"
+                accept=".mp4,.webm,video/mp4,video/webm"
+            /></label>
+            <span id="file-name" class="muted small"
+              >Nenhum arquivo selecionado</span
+            >
+          </form>
+          <form id="youtube-form" class="source-card">
+            <div class="source-icon play-icon">▶</div>
+            <h3>Link do YouTube</h3>
+            <p>Baixa uma cópia local em até 480p para editar.</p>
+            <div class="url-row">
+              <input
+                id="youtube-url"
+                type="url"
+                placeholder="https://youtube.com/watch?v=..."
+                required
+              /><button class="button secondary" type="submit">Baixar</button>
+            </div>
+            <span class="muted small"
+              >Requer yt-dlp instalado. Use vídeos que você tem autorização para
+              baixar.</span
+            >
+          </form>
+        </div>
+        <div id="source-status" class="status" aria-live="polite"></div>
+      </section>
+
+      <section id="editor" class="panel editor-panel hidden">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">02 / MARCAÇÃO</p>
+            <h2>Revise e marque os lances</h2>
+          </div>
+          <span class="step-number">02</span>
+        </div>
+        <div class="video-meta">
+          <div class="video-dot"></div>
+          <div>
+            <strong id="loaded-name">Vídeo</strong
+            ><span id="video-dimensions" class="muted"></span>
+          </div>
+          <button id="change-video" class="text-button">Trocar vídeo</button>
+        </div>
+        <video id="player" controls preload="metadata"></video>
+        <div class="timeline-row">
+          <span id="current-time">00:00</span
+          ><input id="seek" type="range" min="0" max="1000" value="0" /><span
+            id="total-time"
+            >00:00</span
+          >
+        </div>
+        <div class="marking-row">
+          <button id="mark-start" class="button mark-button">
+            <kbd>I</kbd><span><b>Marcar início</b><small>do lance</small></span>
+          </button>
+          <div class="pending-mark">
+            <span class="pending-dot"></span
+            ><span id="pending-text">Nenhum início marcado</span>
+          </div>
+          <button id="mark-end" class="button mark-button end-button">
+            <kbd>O</kbd><span><b>Marcar fim</b><small>do lance</small></span>
+          </button>
+        </div>
+        <div class="shortcut-hint">
+          <span>ATALHOS</span><kbd>Espaço</kbd> reproduzir/pausar <kbd>←</kbd
+          ><kbd>→</kbd> voltar/avançar 5 s <kbd>I</kbd> início <kbd>O</kbd> fim
+        </div>
+        <div class="clips-header">
+          <div>
+            <p class="eyebrow">INTERVALOS SELECIONADOS</p>
+            <h3>Lances <span id="clip-count" class="count-pill">0</span></h3>
+          </div>
+          <label class="margin-control"
+            >Margem de corte
+            <input
+              id="margin"
+              type="number"
+              min="0"
+              max="15"
+              step="0.5"
+              value="3"
+            />
+            s</label
+          >
+        </div>
+        <div id="empty-clips" class="empty-state">
+          Os lances marcados aparecerão aqui.
+        </div>
+        <ol id="clips-list" class="clips-list"></ol>
+        <div class="export-row">
+          <div>
+            <strong>Pronto para montar o vídeo?</strong>
+            <p>Os trechos serão unidos em um MP4 com H.264 e AAC.</p>
+          </div>
+          <div class="export-actions">
+            <label class="margin-control"
+              >Resolução da saída
+              <select id="resolution">
+                <option value="480">480p</option>
+                <option value="720">720p</option>
+                <option value="1080">1080p</option>
+                <option value="original" selected>Original</option>
+              </select></label
+            >
+            <button id="export-button" class="button primary" disabled>
+              Exportar vídeo <span>→</span>
+            </button>
+          </div>
+        </div>
+        <div id="export-status" class="status" aria-live="polite"></div>
+      </section>
+      <footer>
+        Os vídeos e resultados ficam no seu computador, nas pastas
+        <code>media</code> e <code>exports</code>.
+      </footer>
+    </main>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
