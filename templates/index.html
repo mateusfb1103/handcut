@@ -56,8 +56,7 @@
               /><button class="button secondary" type="submit">Baixar</button>
             </div>
             <span class="muted small"
-              >Requer yt-dlp instalado. Use vídeos que você tem autorização para
-              baixar.</span
+              >Use vídeos que você tem autorização para baixar.</span
             >
           </form>
         </div>
@@ -149,8 +148,18 @@
         <div id="export-status" class="status" aria-live="polite"></div>
       </section>
       <footer>
-        Os vídeos e resultados ficam no seu computador, nas pastas
-        <code>media</code> e <code>exports</code>.
+        <div class="footer-tools">
+          <span id="ytdlp-version" class="muted"></span>
+          <button id="update-ytdlp" class="text-button" type="button">
+            Atualizar yt-dlp
+          </button>
+          <button id="cleanup" class="text-button" type="button">
+            Limpar arquivos temporários
+          </button>
+        </div>
+        <div id="maintenance-status" class="status" aria-live="polite"></div>
+        Os vídeos baixados e as exportações ficam em
+        <code>{{ data_dir }}</code>.
       </footer>
     </main>
     <script src="{{ url_for('static', filename='app.js') }}"></script>

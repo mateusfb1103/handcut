@@ -36,8 +36,7 @@ function updateResolutionOptions(sourceHeight, maxHeight) {
     }
     const target = Number(option.value);
     const unavailable =
-      best > 0 &&
-      (target > best || (target === best && target === sourceHeight));
+      best > 0 && (target > best || (target === best && target === sourceHeight));
     const note = target === best ? "igual à origem" : "maior que a origem";
     option.disabled = unavailable;
     option.textContent = unavailable ? `${target}p (${note})` : `${target}p`;
@@ -130,6 +129,32 @@ $("#youtube-form").addEventListener("submit", async (event) => {
     setStatus($("#source-status"), error.message, "error");
   } finally {
     button.disabled = false;
+  }
+});
+
+// ---- Seletor de arquivos nativo (janela pywebview): lê o vídeo onde ele está, sem copiar ----
+function hasNativePicker() {
+  return Boolean(window.pywebview && window.pywebview.api && window.pywebview.api.choose_video);
+}
+$("#video-file").addEventListener("click", async (event) => {
+  if (!hasNativePicker()) return; // no navegador comum, vale o seletor padrão (envia uma cópia)
+  event.preventDefault();
+  const path = await window.pywebview.api.choose_video();
+  if (!path) return;
+  $("#file-name").textContent = path.split(/[\\/]/).pop();
+  setStatus($("#source-status"), "Verificando o vídeo…", "working");
+  try {
+    const data = await readError(
+      await fetch("/api/open-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      }),
+    );
+    setStatus($("#source-status"), "Vídeo aberto. Já pode marcar os lances.", "success");
+    enterEditor(data);
+  } catch (error) {
+    setStatus($("#source-status"), error.message, "error");
   }
 });
 
@@ -232,6 +257,8 @@ function handlePlayerShortcut(event) {
     event.key.toLowerCase() === "o";
   if (!isPlayerShortcut) return;
 
+  // Capture before native video controls so they don't also seek or toggle
+  // playback on keydown/keyup when the player has focus.
   event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation();
@@ -333,3 +360,58 @@ $("#change-video").addEventListener("click", () => {
   $("#file-name").textContent = "Nenhum arquivo selecionado";
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
+
+// ---- Manutenção: versão do yt-dlp, atualização e limpeza ----
+async function refreshMaintenance() {
+  try {
+    const data = await readError(await fetch("/api/maintenance"));
+    $("#ytdlp-version").textContent = `yt-dlp ${data.ytdlp_version} · ${data.used} em uso`;
+  } catch {
+    $("#ytdlp-version").textContent = "";
+  }
+}
+
+async function runMaintenance(button, start) {
+  const status = $("#maintenance-status");
+  button.disabled = true;
+  try {
+    await start(status);
+  } catch (error) {
+    setStatus(status, error.message, "error");
+  } finally {
+    button.disabled = false;
+    refreshMaintenance();
+  }
+}
+
+$("#update-ytdlp").addEventListener("click", (event) =>
+  runMaintenance(event.currentTarget, async (status) => {
+    setStatus(status, "Procurando atualização do yt-dlp…", "working");
+    const { job_id } = await readError(await fetch("/api/update-ytdlp", { method: "POST" }));
+    await pollJob(
+      job_id,
+      (job) => setStatus(status, job.message, job.status === "error" ? "error" : "working"),
+      (job) => setStatus(status, job.message, "success"),
+    );
+  }),
+);
+
+$("#cleanup").addEventListener("click", (event) => {
+  const message =
+    "Apagar os vídeos baixados do YouTube, os arquivos temporários e os vídeos exportados? " +
+    "Exportações que você ainda não baixou serão perdidas. " +
+    "O vídeo aberto agora e os arquivos escolhidos no seu computador não serão apagados.";
+  if (!window.confirm(message)) return;
+  runMaintenance(event.currentTarget, async (status) => {
+    const result = await readError(
+      await fetch("/api/cleanup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keep_media_id: mediaId }),
+      }),
+    );
+    setStatus(status, `Limpeza concluída: ${result.removed} item(ns), ${result.freed} liberados.`, "success");
+  });
+});
+
+refreshMaintenance();

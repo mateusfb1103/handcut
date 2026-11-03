@@ -580,3 +580,18 @@ footer code {
     flex-wrap: wrap;
   }
 }
+.footer-tools {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 6px;
+}
+.footer-tools .text-button {
+  margin-left: 0;
+  font-size: 10px;
+}
+footer .status {
+  font-size: 10px;
+}
