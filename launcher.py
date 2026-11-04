@@ -1,9 +1,10 @@
 """Abre o Handcut em uma janela própria (pywebview), sem precisar do navegador.
 
-Use:  python launcher.py
+Uso:  python launcher.py
 """
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
@@ -36,6 +37,23 @@ class Api:
         return result[0] if result else None
 
 
+def unblock_own_files() -> None:
+    """Tira a marca "veio da internet" dos arquivos do programa (só no Windows, versão empacotada).
+
+    Arquivos extraídos de um ZIP baixado recebem essa marca, e o .NET se recusa a carregar as
+    DLLs marcadas, o que impede a janela de abrir. Sem a marca, o usuário não precisa
+    desbloquear o ZIP à mão.
+    """
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+        return
+    for path in Path(sys.executable).parent.rglob("*"):
+        if path.suffix.lower() in {".dll", ".exe", ".pyd"}:
+            try:
+                os.remove(f"{path}:Zone.Identifier")  # a marca fica em um fluxo alternativo do arquivo
+            except OSError:
+                pass  # arquivo sem marca (o normal) ou sem permissão
+
+
 def start_server() -> int:
     """Sobe o servidor do app em uma porta livre (a porta 0 pede uma ao sistema) e devolve o número."""
     server = make_server("127.0.0.1", 0, app, threaded=True)
@@ -55,14 +73,17 @@ def report_error(details: str) -> None:
 
         ctypes.windll.user32.MessageBoxW(
             0,
-            "Não foi possível abrir o Handcut.\n\nConfirme que o Microsoft Edge WebView2 está "
-            f"instalado. Os detalhes estão em:\n{LOG_FILE}",
+            "Não foi possível abrir o Handcut.\n\n"
+            "Se o programa veio de um ZIP baixado, clique com o botão direito no ZIP, abra "
+            "Propriedades, marque Desbloquear e extraia de novo.\n\n"
+            f"Os detalhes estão em:\n{LOG_FILE}",
             WINDOW_TITLE,
             0x10,
         )
 
 
 def main() -> None:
+    unblock_own_files()
     # Sem isto, o link "Baixar" não faz nada dentro da janela. Com isto, o Windows abre
     # o "Salvar como", em que o usuário escolhe a pasta e o nome do arquivo.
     webview.settings["ALLOW_DOWNLOADS"] = True

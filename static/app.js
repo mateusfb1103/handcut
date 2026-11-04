@@ -1,5 +1,12 @@
 const $ = (selector) => document.querySelector(selector);
 const player = $("#player");
+player.addEventListener("click", () => {
+  if (player.paused) {
+    player.play().catch(() => {});
+  } else {
+    player.pause();
+  }
+});
 let mediaId = null;
 let clips = [];
 let pendingStart = null;
@@ -241,9 +248,13 @@ $("#seek").addEventListener("input", (event) => {
     player.currentTime = (Number(event.target.value) / 1000) * player.duration;
 });
 function isShortcutInput(target) {
+  // A barra de progresso (input range) fica de fora: depois de clicar nela, os atalhos
+  // continuam valendo e as setas não movem a barra por conta própria.
   return (
     target instanceof Element &&
-    target.matches('input,textarea,select,button,[contenteditable="true"]')
+    target.matches(
+      'input:not([type="range"]),textarea,select,button,[contenteditable="true"]',
+    )
   );
 }
 
