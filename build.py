@@ -19,10 +19,14 @@ ROOT = Path(__file__).resolve().parent
 APP_NAME = "Handcut"
 SUFFIX = ".exe" if os.name == "nt" else ""
 REQUIRED_TOOLS = [f"{name}{SUFFIX}" for name in ("ffmpeg", "ffprobe", "deno", "yt-dlp")]
-
+ICON_PATH = ROOT / "handcut.ico"
 
 def check_vendor() -> None:
     vendor = ROOT / "vendor"
+
+    if not ICON_PATH.is_file():
+        sys.exit(f"Ícone não encontrado: {ICON_PATH}")
+        
     missing = [name for name in REQUIRED_TOOLS if not (vendor / name).is_file()]
     if missing:
         sys.exit(f"Faltam arquivos em {vendor}:\n  " + "\n  ".join(missing))
@@ -41,6 +45,7 @@ def main() -> None:
         "--add-data", f"{ROOT / 'templates'}{separator}templates",
         "--add-data", f"{ROOT / 'static'}{separator}static",
         "--add-data", f"{ROOT / 'vendor'}{separator}vendor",
+        "--icon", str(ICON_PATH),
         str(ROOT / "launcher.py"),
     ]
     subprocess.run(command, cwd=ROOT, check=True)
