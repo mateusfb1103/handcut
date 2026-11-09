@@ -65,6 +65,12 @@ media_sources: dict[str, dict] = {}
 MAX_REMOTE_HEIGHT = 1080
 DOWNLOAD_TIMEOUT_SECONDS = 2 * 60 * 60
 PROGRESS_LOG_INTERVAL_SECONDS = 30  # how often a long export prints its speed in the terminal
+# Vídeo de encerramento (logo animado) colado no fim de toda exportação. Fica em static/, que o
+# build.py já inclui no pacote. Para exportar sem ele, troque ADD_OUTRO para False.
+ADD_OUTRO = True
+OUTRO_FILE = RESOURCE_DIR / "static" / "videos" / "outro.mp4"
+# Duração (em segundos) da transição para preto no fim do último lance, antes do encerramento.
+OUTRO_FADE_SECONDS = 0.5
 
 
 def run(command: list[str], *, timeout: int | None = None) -> subprocess.CompletedProcess:
@@ -83,6 +89,64 @@ def probe(path: Path) -> dict:
     if duration <= 0 or not video:
         raise ValueError("Não encontrei uma faixa de vídeo válida nesse arquivo.")
     return {"duration": duration, "width": video.get("width"), "height": video.get("height")}
+
+
+def probe_streams(path: Path) -> tuple[dict, dict | None]:
+    """Dados da faixa de vídeo (tamanho, fps) e da faixa de áudio (None se o vídeo não tem áudio)."""
+    result = run([
+        "ffprobe", "-v", "error", "-show_entries",
+        "stream=codec_type,width,height,avg_frame_rate,sample_rate,channels", "-of", "json", str(path),
+    ], timeout=60)
+    streams = json.loads(result.stdout).get("streams", [])
+    video = next((stream for stream in streams if stream.get("codec_type") == "video"), {})
+    audio = next((stream for stream in streams if stream.get("codec_type") == "audio"), None)
+    return video, audio
+
+
+def make_outro_part(job_id: str, reference: Path, work_dir: Path) -> Path | None:
+    """Prepara o encerramento com os mesmos parâmetros dos lances (tamanho, fps, áudio).
+
+    Os lances são juntados com "-c copy" (sem reencodar), então o encerramento precisa ter
+    exatamente o mesmo formato deles. `reference` é o primeiro lance já exportado. Se algo der
+    errado, devolve None e a exportação segue sem o encerramento (o motivo vai para o log).
+    """
+    if not OUTRO_FILE.is_file():
+        export_log(job_id, f"encerramento não encontrado em {OUTRO_FILE}; exportando sem ele")
+        return None
+    try:
+        video, audio = probe_streams(reference)
+        width, height = int(video["width"]), int(video["height"])
+        fps = video.get("avg_frame_rate") or "30/1"
+        if fps in ("0/0", "0/1"):
+            fps = "30/1"
+        part = work_dir / "part-outro.mp4"
+        command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(OUTRO_FILE)]
+        if audio:
+            # Os lances têm áudio: o encerramento recebe um silêncio com o mesmo formato de áudio.
+            channels = int(audio.get("channels") or 2)
+            rate = int(audio.get("sample_rate") or 44100)
+            layout = "mono" if channels == 1 else "stereo"
+            command += ["-f", "lavfi", "-i", f"anullsrc=r={rate}:cl={layout}"]
+        command += ["-map", "0:v:0"]
+        if audio:
+            command += ["-map", "1:a:0"]
+        # Cabe o encerramento (16:9) no tamanho dos lances; a sobra fica preta, como o fundo dele.
+        command += [
+            "-vf", (f"fps={fps},scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+        ]
+        if audio:
+            command += ["-c:a", "aac", "-b:a", "128k", "-ar", str(rate), "-ac", str(channels), "-shortest"]
+        else:
+            command += ["-an"]
+        command += ["-movflags", "+faststart", str(part)]
+        run(command, timeout=120)
+        return part
+    except Exception as exc:
+        detail = (getattr(exc, "stderr", "") or str(exc)).strip()[-300:]
+        export_log(job_id, f"não consegui preparar o encerramento ({detail}); exportando sem ele")
+        return None
 
 
 def add_job(kind: str) -> str:
@@ -556,15 +620,27 @@ def export_worker(job_id: str, media_path: Path, segments: list[dict], margin: f
             export_log(job_id, f"download dos trechos: {time.perf_counter() - download_started:.1f}s")
         segment_paths: list[Path] = []
         done_content = 0.0
+        with_outro = ADD_OUTRO and OUTRO_FILE.is_file()
         for number, (index, start, end) in enumerate(plan, 1):
             part = work_dir / f"part-{index:04d}.mp4"
             label = f"lance {number}/{len(plan)}"
             # Trecho já baixado: usa o arquivo inteiro. Caso contrário, corta do vídeo de origem.
-            input_args = (["-i", str(section_files[index])] if remote_height
+            input_file = section_files[index] if remote_height else media_path
+            input_args = (["-i", str(input_file)] if remote_height
                           else ["-ss", f"{start:.3f}", "-i", str(media_path), "-t", f"{end - start:.3f}"])
+            # Último lance: escurece o fim (imagem e som) para o corte até o encerramento não ser brusco.
+            video_filters = [scale_args[1]] if scale_args else []
+            audio_args: list[str] = []
+            if with_outro and number == len(plan):
+                fade = min(OUTRO_FADE_SECONDS, end - start)
+                fade_start = f"{end - start - fade:.3f}"
+                video_filters.append(f"fade=t=out:st={fade_start}:d={fade:.3f}")
+                if probe_streams(input_file)[1]:
+                    audio_args = ["-af", f"afade=t=out:st={fade_start}:d={fade:.3f}"]
+            video_args = ["-vf", ",".join(video_filters)] if video_filters else []
             elapsed = run_ffmpeg([
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *input_args,
-                "-map", "0:v:0", "-map", "0:a?", *scale_args,
+                "-map", "0:v:0", "-map", "0:a?", *video_args, *audio_args,
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(part),
             ], job_id=job_id, content_seconds=end - start, base_done=done_content,
@@ -573,6 +649,11 @@ def export_worker(job_id: str, media_path: Path, segments: list[dict], margin: f
             done_content += end - start
             export_log(job_id, f"{label}: {fmt_time(end - start)} de vídeo em {elapsed:.1f}s "
                                f"({(end - start) / max(elapsed, 0.001):.1f}x)")
+        if ADD_OUTRO:
+            finish_job(job_id, message="Adicionando o encerramento…", progress=94)
+            outro_part = make_outro_part(job_id, segment_paths[0], work_dir)
+            if outro_part:
+                segment_paths.append(outro_part)
         concat_started = time.perf_counter()
         list_file = work_dir / "concat.txt"
         list_file.write_text("".join(f"file '{path.name}'\n" for path in segment_paths), encoding="utf-8")
