@@ -95,7 +95,7 @@ def probe_streams(path: Path) -> tuple[dict, dict | None]:
     """Dados da faixa de vídeo (tamanho, fps) e da faixa de áudio (None se o vídeo não tem áudio)."""
     result = run([
         "ffprobe", "-v", "error", "-show_entries",
-        "stream=codec_type,width,height,avg_frame_rate,sample_rate,channels", "-of", "json", str(path),
+        "stream=codec_type,width,height,avg_frame_rate,time_base,sample_rate,channels", "-of", "json", str(path),
     ], timeout=60)
     streams = json.loads(result.stdout).get("streams", [])
     video = next((stream for stream in streams if stream.get("codec_type") == "video"), {})
@@ -103,11 +103,33 @@ def probe_streams(path: Path) -> tuple[dict, dict | None]:
     return video, audio
 
 
+STANDARD_FPS = [(24000, 1001), (24, 1), (25, 1), (30000, 1001), (30, 1), (50, 1), (60000, 1001), (60, 1)]
+
+
+def standard_fps(rate: str) -> str:
+    """Taxa de quadros "redonda" (ex.: 60000/1001) a partir da taxa média medida pelo ffprobe.
+
+    A média medida pode vir como uma fração esquisita (ex.: 183480/3061 em vídeos de 59,94 fps),
+    que não serve para o encerramento: ele precisa de uma taxa padrão.
+    """
+    try:
+        num, den = rate.split("/")
+        value = int(num) / int(den)
+    except (ValueError, ZeroDivisionError):
+        return "30/1"
+    if value <= 0:
+        return "30/1"
+    best = min(STANDARD_FPS, key=lambda item: abs(item[0] / item[1] - value))
+    if abs(best[0] / best[1] - value) / value < 0.02:
+        return f"{best[0]}/{best[1]}"
+    return f"{max(1, round(value))}/1"
+
+
 def make_outro_part(job_id: str, reference: Path, work_dir: Path) -> Path | None:
     """Prepara o encerramento com os mesmos parâmetros dos lances (tamanho, fps, áudio).
 
     Os lances são juntados com "-c copy" (sem reencodar), então o encerramento precisa ter
-    exatamente o mesmo formato deles. `reference` é o primeiro lance já exportado. Se algo der
+    exatamente o mesmo formato deles. `reference` é o último lance já exportado. Se algo der
     errado, devolve None e a exportação segue sem o encerramento (o motivo vai para o log).
     """
     if not OUTRO_FILE.is_file():
@@ -116,9 +138,13 @@ def make_outro_part(job_id: str, reference: Path, work_dir: Path) -> Path | None
     try:
         video, audio = probe_streams(reference)
         width, height = int(video["width"]), int(video["height"])
-        fps = video.get("avg_frame_rate") or "30/1"
-        if fps in ("0/0", "0/1"):
-            fps = "30/1"
+        fps = standard_fps(video.get("avg_frame_rate") or "")
+        # Escala de tempo do vídeo (ex.: 1/15360 -> 15360). Se for diferente da dos lances, o FFmpeg
+        # novo calcula a duração errada na junção (o encerramento aparecia minutos depois do fim).
+        timescale_args: list[str] = []
+        numerator, _, denominator = str(video.get("time_base", "")).partition("/")
+        if numerator == "1" and denominator.isdigit() and int(denominator) > 0:
+            timescale_args = ["-video_track_timescale", denominator]
         part = work_dir / "part-outro.mp4"
         command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(OUTRO_FILE)]
         if audio:
@@ -135,6 +161,7 @@ def make_outro_part(job_id: str, reference: Path, work_dir: Path) -> Path | None
             "-vf", (f"fps={fps},scale={width}:{height}:force_original_aspect_ratio=decrease,"
                     f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"),
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+            *timescale_args,
         ]
         if audio:
             command += ["-c:a", "aac", "-b:a", "128k", "-ar", str(rate), "-ac", str(channels), "-shortest"]
