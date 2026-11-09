@@ -1,12 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
 const player = $("#player");
-player.addEventListener("click", () => {
-  if (player.paused) {
-    player.play().catch(() => {});
-  } else {
-    player.pause();
-  }
-});
 let mediaId = null;
 let clips = [];
 let pendingStart = null;
@@ -92,6 +85,15 @@ $("#video-file").addEventListener("change", async (event) => {
   }
 });
 
+try {
+  $("#youtube-cookies").value = localStorage.getItem("handcut-cookies") || "";
+} catch (_) {}
+$("#youtube-cookies").addEventListener("change", (event) => {
+  try {
+    localStorage.setItem("handcut-cookies", event.target.value);
+  } catch (_) {}
+});
+
 $("#youtube-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector("button");
@@ -102,7 +104,10 @@ $("#youtube-form").addEventListener("submit", async (event) => {
       await fetch("/api/download", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: $("#youtube-url").value }),
+        body: JSON.stringify({
+          url: $("#youtube-url").value,
+          cookies: $("#youtube-cookies").value,
+        }),
       }),
     );
     await pollJob(
@@ -235,6 +240,11 @@ function renderClips() {
   });
   $("#export-button").disabled = clips.length === 0 || busy;
 }
+
+// Depois de um clique nos controles nativos do player, o teclado passa a valer só para eles
+// (as setas pulam outro valor e I, O e espaço deixam de funcionar). Tirar o foco do player
+// devolve os atalhos do app.
+player.addEventListener("focus", () => player.blur());
 
 player.addEventListener("timeupdate", () => {
   $("#current-time").textContent = formatTime(player.currentTime);

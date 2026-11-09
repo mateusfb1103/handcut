@@ -57,8 +57,17 @@
                 required
               /><button class="button secondary" type="submit">Baixar</button>
             </div>
+            <label class="cookie-control muted small"
+              >Cookies do navegador
+              <select id="youtube-cookies">
+                <option value="">Nenhum</option>
+                <option value="firefox">Firefox</option>
+              </select></label
+            >
             <span class="muted small"
-              >Use vídeos que você tem autorização para baixar.</span
+              >Use "Firefox" só se o YouTube pedir para confirmar que você não
+              é um robô (precisa estar logado no YouTube no Firefox). Use
+              vídeos que você tem autorização para baixar.</span
             >
           </form>
         </div>
@@ -81,7 +90,7 @@
           </div>
           <button id="change-video" class="text-button">Trocar vídeo</button>
         </div>
-        <video id="player" preload="metadata"></video>
+        <video id="player" controls preload="metadata"></video>
         <div class="timeline-row">
           <span id="current-time">00:00</span
           ><input id="seek" type="range" min="0" max="1000" value="0" /><span
