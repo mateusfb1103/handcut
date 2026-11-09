@@ -42,7 +42,6 @@ body {
     overflow: hidden;
     border-radius: 25%;
 }
-
 .brand-mark img {
     width: 100%;
     height: 100%;
@@ -202,6 +201,15 @@ body {
 }
 .url-row input:focus {
   border-color: #758b64;
+}
+.cookie-control select {
+  background: #101512;
+  border: 1px solid #303a34;
+  border-radius: 6px;
+  color: #e9eee9;
+  padding: 5px 6px;
+  margin-left: 5px;
+  font: inherit;
 }
 .button {
   padding: 10px 14px;

@@ -165,6 +165,31 @@ def ytdlp_prefix() -> list[str]:
     return [str(local)] if local.exists() else [sys.executable, "-m", "yt_dlp"]
 
 
+ALLOWED_COOKIE_BROWSERS = {"", "firefox"}  # "" = sem cookies (padrão)
+
+
+def cookie_args(browser: str) -> list[str]:
+    """Argumentos do yt-dlp para usar os cookies do navegador escolhido (só o Firefox funciona no Windows)."""
+    return ["--cookies-from-browser", browser] if browser in ALLOWED_COOKIE_BROWSERS - {""} else []
+
+
+def youtube_error_message(detail: str, default: str) -> str:
+    """Mensagem amigável para os erros mais comuns do yt-dlp; senão devolve `default`."""
+    if "This video is not available" in detail:
+        return (
+            "O YouTube não disponibilizou este vídeo para o download. Verifique se o link abre "
+            "no navegador deste computador. Vídeos privados, restritos por idade ou região, "
+            "ou que exigem login podem não ser acessíveis pelo link."
+        )
+    if "Sign in to confirm" in detail:
+        return (
+            "O YouTube bloqueou o download por suspeita de acesso automatizado (comum em algumas redes). "
+            "Escolha \"Firefox\" em \"Cookies do navegador\" (você precisa estar logado no YouTube nele) "
+            "ou tente de outra rede, como os dados móveis do celular."
+        )
+    return default
+
+
 def ytdlp_version() -> str:
     try:
         return run(ytdlp_prefix() + ["--version"], timeout=60).stdout.strip() or "desconhecida"
@@ -206,10 +231,10 @@ def best_available_height(info_files, fallback: int) -> int:
 
 
 def download_sections(job_id: str, url: str, plan: list[tuple[int, float, float]], height: int,
-                      work_dir: Path) -> dict[int, Path]:
+                      work_dir: Path, cookies_browser: str = "") -> dict[int, Path]:
     """Baixa do YouTube só os trechos do plano, em até `height` p. Devolve {índice do lance: arquivo}."""
     output_template = str(work_dir / "sec-%(section_start)010.3f.%(ext)s")
-    command = ytdlp_prefix() + [
+    command = ytdlp_prefix() + cookie_args(cookies_browser) + [
                "--no-playlist", "--newline", "--retries", "3", "--fragment-retries", "3",
                "--extractor-retries", "2", "--socket-timeout", "30", "-f",
                f"bv*[vcodec^=avc1][height<={height}]/bv*[height<={height}]",
@@ -233,7 +258,7 @@ def download_sections(job_id: str, url: str, plan: list[tuple[int, float, float]
     return result
 
 
-def download_worker(job_id: str, url: str) -> None:
+def download_worker(job_id: str, url: str, cookies_browser: str = "") -> None:
     try:
         # Use the same interpreter as the running app so yt-dlp and its EJS
         # companion package come from the environment installed by requirements.txt.
@@ -241,7 +266,7 @@ def download_worker(job_id: str, url: str) -> None:
         # Nome só com ASCII (sem o título): acentos no caminho quebravam a junção no Windows.
         output_template = str(MEDIA_DIR / f"download-{job_id}-%(id)s.%(ext)s")
         # Só vídeo (sem áudio), no máximo 480p: download e edição mais rápidos.
-        command = prefix + [
+        command = prefix + cookie_args(cookies_browser) + [
             "--no-playlist", "--newline", "--retries", "3", "--fragment-retries", "3",
             "--extractor-retries", "2", "--file-access-retries", "2", "--socket-timeout", "30",
             "--write-info-json", "-f",
@@ -257,32 +282,20 @@ def download_worker(job_id: str, url: str) -> None:
         info = probe(video)
         max_height = best_available_height(MEDIA_DIR.glob(f"download-{job_id}-*.info.json"), int(info.get("height") or 0))
         active_media[job_id] = video
-        media_sources[job_id] = {"url": url, "max_height": max_height}
+        media_sources[job_id] = {"url": url, "max_height": max_height, "cookies": cookies_browser}
         finish_job(job_id, status="done", message="Vídeo baixado e pronto para marcar.", media_id=job_id,
                    name=video.name, max_height=max_height, **info)
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or "").strip()[-1200:]
-        if "This video is not available" in detail:
-            message = (
-                "O YouTube não disponibilizou este vídeo para o download. Verifique se o link abre "
-                "no navegador deste computador. Vídeos privados, restritos por idade ou região, "
-                "ou que exigem login podem não ser acessíveis pelo link."
-            )
-        else:
-            message = "Falha no download pelo yt-dlp. Confira o link e as mensagens de diagnóstico abaixo."
+        message = youtube_error_message(
+            detail, "Falha no download pelo yt-dlp. Confira o link e as mensagens de diagnóstico abaixo.")
         finish_job(job_id, status="error", message=message, detail=detail)
     except TimeoutError as exc:
         finish_job(job_id, status="error", message=str(exc))
     except RuntimeError as exc:
         detail = str(exc).strip()[-1200:]
-        if "This video is not available" in detail:
-            message = (
-                "O YouTube não disponibilizou este vídeo para o download. Verifique se o link abre "
-                "no navegador deste computador. Vídeos privados, restritos por idade ou região, "
-                "ou que exigem login podem não ser acessíveis pelo link."
-            )
-        else:
-            message = "O yt-dlp encerrou o download com erro. Veja a última mensagem abaixo."
+        message = youtube_error_message(
+            detail, "O yt-dlp encerrou o download com erro. Veja a última mensagem abaixo.")
         finish_job(job_id, status="error", message=message, detail=detail)
     except Exception as exc:
         finish_job(job_id, status="error", message=str(exc))
@@ -403,13 +416,16 @@ def upload():
 @app.post("/api/download")
 def download():
     url = (request.json or {}).get("url", "").strip()
+    cookies_browser = str((request.json or {}).get("cookies", "")).strip().lower()
+    if cookies_browser not in ALLOWED_COOKIE_BROWSERS:
+        return jsonify(error="Navegador de cookies não suportado."), 400
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     youtube_host = host in {"youtu.be", "youtube.com", "youtube-nocookie.com"} or host.endswith(".youtube.com") or host.endswith(".youtube-nocookie.com")
     if parsed.scheme not in {"http", "https"} or not youtube_host:
         return jsonify(error="Informe um link válido do YouTube."), 400
     job_id = add_job("download")
-    threading.Thread(target=download_worker, args=(job_id, url), daemon=True).start()
+    threading.Thread(target=download_worker, args=(job_id, url, cookies_browser), daemon=True).start()
     return jsonify(job_id=job_id), 202
 
 
@@ -535,7 +551,8 @@ def export_worker(job_id: str, media_path: Path, segments: list[dict], margin: f
         if remote_height:
             finish_job(job_id, message=f"Baixando os {len(plan)} lance(s) em {remote_height}p do YouTube…")
             download_started = time.perf_counter()
-            section_files = download_sections(job_id, source["url"], plan, remote_height, work_dir)
+            section_files = download_sections(job_id, source["url"], plan, remote_height, work_dir,
+                                              source.get("cookies", ""))
             export_log(job_id, f"download dos trechos: {time.perf_counter() - download_started:.1f}s")
         segment_paths: list[Path] = []
         done_content = 0.0
