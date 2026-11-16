@@ -44,6 +44,15 @@ Aplicativo local para carregar um vídeo `.mp4` ou `.webm` (ou baixar um vídeo 
 
 Os intervalos são exportados na ordem do jogo. A margem padrão adiciona 3 segundos antes e depois de cada intervalo, limitada ao começo e ao fim do vídeo. A exportação reencoda em H.264 para permitir cortes precisos. Arquivos carregados ficam em `media/`; resultados ficam em `exports/`.
 
+## Sugestão automática de lances (Fase 2)
+
+Com um vídeo aberto, o bloco "Sugestão automática" analisa o jogo e adiciona à lista os trechos de ataque ou de defesa do seu time (marcados como "sugerido"). Você revisa, remove o que estiver errado e exporta como de costume.
+
+- Escolha se o seu time veste camisa **clara** ou **escura** e se quer **ataques** ou **defesas**.
+- Um modelo YOLO (`models/yolo11n.onnx`) acha os jogadores, a cor da camisa separa os times e o time mais perto do gol é o que defende. O código está em `detector.py`.
+- Roda só na CPU. Em testes, analisar o vídeo leva cerca de 0,2x da duração dele em um núcleo (1 hora de vídeo ≈ 12 minutos).
+- Para medir o quanto acerta em outro jogo, anote os lances reais e rode `python tools/avaliar_deteccao.py VIDEO.mp4 GABARITO.txt --camisa clara` (o formato do gabarito está no começo do script).
+
 ## Observações
 
 - O servidor escuta apenas em `127.0.0.1`, portanto a interface é acessível somente neste computador.

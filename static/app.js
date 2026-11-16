@@ -4,6 +4,7 @@ let mediaId = null;
 let clips = [];
 let pendingStart = null;
 let busy = false;
+let autoResult = null; // última análise automática: { mediaId, shirt, suggestions }
 
 function formatTime(seconds) {
   const value = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -48,6 +49,8 @@ function enterEditor(data) {
   mediaId = data.media_id;
   clips = [];
   pendingStart = null;
+  autoResult = null;
+  setStatus($("#auto-status"), "", "");
   $("#editor").classList.remove("hidden");
   $("#loaded-name").textContent = data.name;
   $("#video-dimensions").textContent =
@@ -225,6 +228,10 @@ function renderClips() {
     const label = document.createElement("span");
     label.className = "clip-label";
     label.textContent = `Lance ${String(index + 1).padStart(2, "0")}`;
+    const tag = document.createElement("span");
+    tag.className = "clip-tag";
+    tag.textContent = "sugerido";
+    tag.hidden = !clip.auto;
     const time = document.createElement("span");
     time.className = "clip-time";
     time.textContent = `${formatTime(clip.start)} — ${formatTime(clip.end)} · ${formatTime(clip.end - clip.start)}`;
@@ -235,7 +242,7 @@ function renderClips() {
       clips.splice(index, 1);
       renderClips();
     });
-    item.append(play, label, time, remove);
+    item.append(play, label, tag, time, remove);
     list.append(item);
   });
   $("#export-button").disabled = clips.length === 0 || busy;
@@ -366,8 +373,78 @@ $("#export-button").addEventListener("click", async () => {
   }
 });
 
+// ---- Sugestão automática (Fase 2) ----
+function addSuggestedClips(kind, suggestions) {
+  let added = 0;
+  for (const item of suggestions[kind] || []) {
+    // Não repete um trecho que já está na lista (por exemplo, ao pedir a sugestão duas vezes).
+    if (clips.some((clip) => clip.start < item.end && item.start < clip.end)) continue;
+    clips.push({ start: item.start, end: item.end, auto: true });
+    added += 1;
+  }
+  clips.sort((a, b) => a.start - b.start);
+  renderClips();
+  return added;
+}
+
+$("#auto-button").addEventListener("click", async () => {
+  if (!mediaId) return;
+  const button = $("#auto-button");
+  const status = $("#auto-status");
+  const analyzed = mediaId;
+  const shirt = $("#auto-shirt").value;
+  const kind = $("#auto-kind").value;
+  button.disabled = true;
+  button.blur(); // devolve os atalhos do teclado (I, O, espaço, setas) ao player
+  try {
+    // A análise é a parte lenta e serve para ataques e defesas. Se já foi feita para este
+    // vídeo e esta cor de camisa, só reaproveita o resultado.
+    if (!autoResult || autoResult.mediaId !== analyzed || autoResult.shirt !== shirt) {
+      setStatus(status, "Iniciando a análise…", "working");
+      const { job_id } = await readError(
+        await fetch("/api/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ media_id: analyzed, shirt }),
+        }),
+      );
+      const job = await pollJob(
+        job_id,
+        (job) => setStatus(status, job.message, job.status === "error" ? "error" : "working"),
+        () => {},
+      );
+      autoResult = { mediaId: analyzed, shirt, suggestions: job.suggestions };
+    }
+    if (mediaId !== analyzed) return; // a pessoa trocou de vídeo durante a análise
+    const found = (autoResult.suggestions[kind] || []).length;
+    const added = addSuggestedClips(kind, autoResult.suggestions);
+    const name = kind === "ataque" ? "ataque(s)" : "defesa(s)";
+    if (added) {
+      setStatus(
+        status,
+        `${added} ${name} sugerido(s) e adicionado(s) à lista. Confira cada um no ▶ antes de exportar.`,
+        "success",
+      );
+    } else if (found) {
+      setStatus(status, `Os ${found} ${name} encontrado(s) já estão na lista.`, "success");
+    } else {
+      setStatus(
+        status,
+        `Não encontrei ${name} neste vídeo. Confira se a cor da camisa está certa.`,
+        "error",
+      );
+    }
+  } catch (error) {
+    setStatus(status, error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // Tira o foco do seletor para os atalhos I, O, espaço e setas voltarem a funcionar.
 $("#resolution").addEventListener("change", (event) => event.target.blur());
+$("#auto-shirt").addEventListener("change", (event) => event.target.blur());
+$("#auto-kind").addEventListener("change", (event) => event.target.blur());
 
 $("#change-video").addEventListener("click", () => {
   player.pause();
@@ -376,6 +453,8 @@ $("#change-video").addEventListener("click", () => {
   mediaId = null;
   clips = [];
   pendingStart = null;
+  autoResult = null;
+  setStatus($("#auto-status"), "", "");
   $("#editor").classList.add("hidden");
   $("#video-file").value = "";
   $("#file-name").textContent = "Nenhum arquivo selecionado";

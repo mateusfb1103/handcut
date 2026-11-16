@@ -20,13 +20,16 @@ APP_NAME = "Handcut"
 SUFFIX = ".exe" if os.name == "nt" else ""
 REQUIRED_TOOLS = [f"{name}{SUFFIX}" for name in ("ffmpeg", "ffprobe", "deno", "yt-dlp")]
 ICON_PATH = ROOT / "handcut.ico"
+MODEL_PATH = ROOT / "models" / "yolo11n.onnx"  # modelo YOLO da sugestão automática (Fase 2)
 
 def check_vendor() -> None:
     vendor = ROOT / "vendor"
 
     if not ICON_PATH.is_file():
         sys.exit(f"Ícone não encontrado: {ICON_PATH}")
-        
+    if not MODEL_PATH.is_file():
+        sys.exit(f"Modelo YOLO não encontrado: {MODEL_PATH}")
+
     missing = [name for name in REQUIRED_TOOLS if not (vendor / name).is_file()]
     if missing:
         sys.exit(f"Faltam arquivos em {vendor}:\n  " + "\n  ".join(missing))
@@ -45,6 +48,11 @@ def main() -> None:
         "--add-data", f"{ROOT / 'templates'}{separator}templates",
         "--add-data", f"{ROOT / 'static'}{separator}static",
         "--add-data", f"{ROOT / 'vendor'}{separator}vendor",
+        "--add-data", f"{ROOT / 'models'}{separator}models",
+        # O detector.py só é importado quando a pessoa pede a sugestão, então o PyInstaller não o
+        # vê sozinho. O onnxruntime traz bibliotecas nativas (DLLs) que precisam ir junto.
+        "--hidden-import", "detector",
+        "--collect-all", "onnxruntime",
         "--icon", str(ICON_PATH),
         str(ROOT / "launcher.py"),
     ]

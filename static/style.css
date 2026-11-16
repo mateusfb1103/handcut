@@ -593,6 +593,35 @@ footer code {
     flex-wrap: wrap;
   }
 }
+/* Sugestão automática (Fase 2) */
+.auto-panel {
+  margin-top: 18px;
+  padding: 14px 15px;
+  background: #111614;
+  border: 1px solid #28312c;
+  border-radius: 10px;
+}
+.auto-text strong {
+  font-size: 12px;
+}
+.auto-text p:not(.eyebrow) {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 4px 0 12px;
+}
+.auto-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.clip-tag {
+  font: 9px "DM Mono";
+  color: var(--green);
+  background: #25351e;
+  border-radius: 20px;
+  padding: 2px 6px;
+}
 .footer-tools {
   display: flex;
   justify-content: center;

@@ -542,9 +542,9 @@ def fmt_time(seconds: float) -> str:
     return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
 
 
-def export_log(job_id: str, text: str) -> None:
+def export_log(job_id: str, text: str, kind: str = "export") -> None:
     """Linha de diagnóstico no terminal (python app.py) e no arquivo handcut.log da pasta de dados."""
-    line = f"[export {job_id[:8]}] {text}"
+    line = f"[{kind} {job_id[:8]}] {text}"
     print(line, flush=True)
     try:
         if LOG_FILE.exists() and LOG_FILE.stat().st_size > 2_000_000:
@@ -733,6 +733,59 @@ def export():
         return jsonify(error=f"Intervalos inválidos: {exc}"), 400
     job_id = add_job("export")
     threading.Thread(target=export_worker, args=(job_id, path, normalized, margin, resolution, media_sources.get(media_id)), daemon=True).start()
+    return jsonify(job_id=job_id), 202
+
+
+def suggest_worker(job_id: str, media_path: Path, mine_is_light: bool) -> None:
+    """Fase 2: acha os ataques e as defesas do time escolhido e devolve intervalos sugeridos."""
+    try:
+        # Importado só aqui: o YOLO (onnxruntime) só é carregado quando a pessoa pede a sugestão.
+        import detector
+
+        info = probe(media_path)
+        started = time.perf_counter()
+        export_log(job_id, f"analisando {media_path.name} ({info['width']}x{info['height']}, "
+                           f"{fmt_time(info['duration'])}), camisa {'clara' if mine_is_light else 'escura'}", "sugestão")
+
+        def progress(fraction: float) -> None:
+            finish_job(job_id, message=f"Analisando o vídeo… {fraction:.0%}", progress=round(fraction * 100))
+
+        samples = detector.extract_samples(media_path, info["duration"], info["width"], info["height"],
+                                           progress=progress)
+        if not samples:
+            raise ValueError("Não consegui ler imagens desse vídeo para analisar.")
+        suggestions = detector.suggest(samples, mine_is_light, duration=info["duration"])
+        elapsed = time.perf_counter() - started
+        export_log(job_id, f"{len(samples)} quadros em {elapsed:.0f}s | "
+                           f"{len(suggestions['ataque'])} ataque(s), {len(suggestions['defesa'])} defesa(s)", "sugestão")
+        finish_job(job_id, status="done", progress=100, suggestions=suggestions,
+                   message=f"Análise pronta: {len(suggestions['ataque'])} ataque(s) e "
+                           f"{len(suggestions['defesa'])} defesa(s) encontrados.")
+    except ImportError as exc:
+        export_log(job_id, f"falta uma biblioteca: {exc}", "sugestão")
+        finish_job(job_id, status="error", detail=str(exc),
+                   message="A sugestão automática precisa do onnxruntime e do OpenCV. "
+                           "Instale com: python -m pip install -r requirements.txt")
+    except Exception as exc:
+        export_log(job_id, f"erro: {exc}", "sugestão")
+        finish_job(job_id, status="error", message=str(exc))
+
+
+@app.post("/api/suggest")
+def suggest_plays():
+    data = request.json or {}
+    path = active_media.get(data.get("media_id"))
+    if not path or not path.exists():
+        return jsonify(error="Carregue um vídeo antes de pedir a sugestão."), 400
+    shirt = str(data.get("shirt", "")).lower()
+    if shirt not in {"clara", "escura"}:
+        return jsonify(error="Informe se o seu time veste camisa clara ou escura."), 400
+    with jobs_lock:
+        busy = any(job["kind"] == "suggest" and job["status"] == "processing" for job in jobs.values())
+    if busy:  # duas análises ao mesmo tempo disputariam a CPU e as duas ficariam lentas
+        return jsonify(error="Já existe uma análise em andamento. Espere ela terminar."), 409
+    job_id = add_job("suggest")
+    threading.Thread(target=suggest_worker, args=(job_id, path, shirt == "clara"), daemon=True).start()
     return jsonify(job_id=job_id), 202
 
 

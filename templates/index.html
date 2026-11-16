@@ -114,6 +114,37 @@
           <span>ATALHOS</span><kbd>Espaço</kbd> reproduzir/pausar <kbd>←</kbd
           ><kbd>→</kbd> voltar/avançar 5 s <kbd>I</kbd> início <kbd>O</kbd> fim
         </div>
+        <div class="auto-panel">
+          <div class="auto-text">
+            <p class="eyebrow">SUGESTÃO AUTOMÁTICA</p>
+            <strong>Deixe o Handcut sugerir os lances</strong>
+            <p>
+              Analisa o vídeo e adiciona à lista os trechos de ataque ou de
+              defesa do seu time. Funciona melhor com a câmera aberta na quadra
+              e camisas bem diferentes entre os times. Revise antes de exportar.
+            </p>
+          </div>
+          <div class="auto-actions">
+            <label class="margin-control"
+              >Meu time veste
+              <select id="auto-shirt">
+                <option value="clara">camisa clara</option>
+                <option value="escura">camisa escura</option>
+              </select></label
+            >
+            <label class="margin-control"
+              >Sugerir
+              <select id="auto-kind">
+                <option value="defesa">defesas</option>
+                <option value="ataque">ataques</option>
+              </select></label
+            >
+            <button id="auto-button" class="button secondary" type="button">
+              Sugerir lances
+            </button>
+          </div>
+          <div id="auto-status" class="status" aria-live="polite"></div>
+        </div>
         <div class="clips-header">
           <div>
             <p class="eyebrow">INTERVALOS SELECIONADOS</p>
