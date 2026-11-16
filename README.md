@@ -42,7 +42,7 @@ Aplicativo local para carregar um vídeo `.mp4` ou `.webm` (ou baixar um vídeo 
 - `I`: marcar início do lance
 - `O`: marcar fim e adicionar o intervalo à lista
 
-Os intervalos são exportados na ordem do jogo. A margem padrão adiciona 3 segundos antes e depois de cada intervalo, limitada ao começo e ao fim do vídeo. A exportação reencoda em H.264/AAC para permitir cortes precisos. Arquivos carregados ficam em `media/`; resultados ficam em `exports/`.
+Os intervalos são exportados na ordem do jogo. A margem padrão adiciona 3 segundos antes e depois de cada intervalo, limitada ao começo e ao fim do vídeo. A exportação reencoda em H.264 para permitir cortes precisos. Arquivos carregados ficam em `media/`; resultados ficam em `exports/`.
 
 ## Observações
 
