@@ -3,6 +3,9 @@ const player = $("#player");
 let mediaId = null;
 let clips = [];
 let pendingStart = null;
+let pendingMarkTarget = null;
+let markingMode = "clip";
+let analysisPeriods = [];
 let busy = false;
 let autoResult = null; // última análise automática: { mediaId, shirt, suggestions }
 
@@ -37,7 +40,8 @@ function updateResolutionOptions(sourceHeight, maxHeight) {
     }
     const target = Number(option.value);
     const unavailable =
-      best > 0 && (target > best || (target === best && target === sourceHeight));
+      best > 0 &&
+      (target > best || (target === best && target === sourceHeight));
     const note = target === best ? "igual à origem" : "maior que a origem";
     option.disabled = unavailable;
     option.textContent = unavailable ? `${target}p (${note})` : `${target}p`;
@@ -45,13 +49,39 @@ function updateResolutionOptions(sourceHeight, maxHeight) {
   if (select.selectedOptions[0]?.disabled) select.value = "original";
 }
 
+function setSourceCollapsed(collapsed) {
+  const source = $("#source-panel");
+  source.classList.toggle("collapsed", collapsed);
+  $("#source-toggle").setAttribute("aria-expanded", String(!collapsed));
+  $("#source-toggle").setAttribute(
+    "aria-label",
+    collapsed ? "Abrir escolha da gravação" : "Recolher escolha da gravação",
+  );
+}
+
+$("#source-toggle").addEventListener("click", (event) => {
+  event.stopPropagation();
+  setSourceCollapsed(!$("#source-panel").classList.contains("collapsed"));
+});
+
+$("#source-panel").addEventListener("click", (event) => {
+  if (!$("#source-panel").classList.contains("collapsed")) return;
+  if (event.target.closest("#source-toggle")) return;
+  setSourceCollapsed(false);
+});
+
 function enterEditor(data) {
   mediaId = data.media_id;
   clips = [];
   pendingStart = null;
+  pendingMarkTarget = null;
+  markingMode = "clip";
+  analysisPeriods = [];
   autoResult = null;
   setStatus($("#auto-status"), "", "");
   $("#editor").classList.remove("hidden");
+  $(".shell").classList.add("editor-layout");
+  setSourceCollapsed(true);
   $("#loaded-name").textContent = data.name;
   $("#video-dimensions").textContent =
     `${data.width} × ${data.height} · ${formatTime(data.duration)}`;
@@ -59,6 +89,8 @@ function enterEditor(data) {
   updateResolutionOptions(Number(data.height), Number(data.max_height));
   player.src = `/api/media/${mediaId}`;
   renderClips();
+  renderAnalysisPeriods();
+  updateMarkingMode();
   $("#editor").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -149,7 +181,11 @@ $("#youtube-form").addEventListener("submit", async (event) => {
 
 // ---- Seletor de arquivos nativo (janela pywebview): lê o vídeo onde ele está, sem copiar ----
 function hasNativePicker() {
-  return Boolean(window.pywebview && window.pywebview.api && window.pywebview.api.choose_video);
+  return Boolean(
+    window.pywebview &&
+    window.pywebview.api &&
+    window.pywebview.api.choose_video,
+  );
 }
 $("#video-file").addEventListener("click", async (event) => {
   if (!hasNativePicker()) return; // no navegador comum, vale o seletor padrão (envia uma cópia)
@@ -166,7 +202,11 @@ $("#video-file").addEventListener("click", async (event) => {
         body: JSON.stringify({ path }),
       }),
     );
-    setStatus($("#source-status"), "Vídeo aberto. Já pode marcar os lances.", "success");
+    setStatus(
+      $("#source-status"),
+      "Vídeo aberto. Já pode marcar os lances.",
+      "success",
+    );
     enterEditor(data);
   } catch (error) {
     setStatus($("#source-status"), error.message, "error");
@@ -176,15 +216,17 @@ $("#video-file").addEventListener("click", async (event) => {
 function markStart() {
   if (!mediaId || !Number.isFinite(player.currentTime)) return;
   pendingStart = player.currentTime;
+  pendingMarkTarget = markingMode;
+  const target = markingMode === "analysis" ? "período de análise" : "lance";
   $("#pending-text").textContent =
-    `Início em ${formatTime(pendingStart)} · marque o fim com O`;
+    `Início do ${target} em ${formatTime(pendingStart)} · marque o fim com O`;
   $(".pending-dot").classList.add("active");
 }
 function markEnd() {
   if (pendingStart === null) {
     setStatus(
       $("#export-status"),
-      "Marque o início do lance com I antes de marcar o fim.",
+      "Marque o início com I antes de marcar o fim.",
       "error",
     );
     return;
@@ -198,16 +240,97 @@ function markEnd() {
     );
     return;
   }
-  clips.push({ start: pendingStart, end });
-  clips.sort((a, b) => a.start - b.start);
+  if (pendingMarkTarget === "analysis") {
+    analysisPeriods.push({ start: pendingStart, end });
+    analysisPeriods.sort((a, b) => a.start - b.start);
+    autoResult = null;
+    renderAnalysisPeriods();
+  } else {
+    clips.push({ start: pendingStart, end });
+    clips.sort((a, b) => a.start - b.start);
+    renderClips();
+  }
   pendingStart = null;
+  pendingMarkTarget = null;
   $("#pending-text").textContent = "Nenhum início marcado";
   $(".pending-dot").classList.remove("active");
   setStatus($("#export-status"), "", "");
-  renderClips();
 }
 $("#mark-start").addEventListener("click", markStart);
 $("#mark-end").addEventListener("click", markEnd);
+
+function resetPendingMark() {
+  pendingStart = null;
+  pendingMarkTarget = null;
+  $("#pending-text").textContent = "Nenhum início marcado";
+  $(".pending-dot").classList.remove("active");
+}
+
+function updateMarkingMode() {
+  const isAnalysis = markingMode === "analysis";
+  $("#analysis-mode-toggle").textContent = isAnalysis
+    ? "Marcando períodos de análise"
+    : "Marcar períodos de análise";
+  $("#analysis-mode-toggle").classList.toggle("active", isAnalysis);
+  $("#analysis-mode-toggle").setAttribute("aria-pressed", String(isAnalysis));
+  $("#mark-start-detail").textContent = isAnalysis
+    ? "do período de análise"
+    : "do lance";
+  $("#mark-end-detail").textContent = isAnalysis
+    ? "do período de análise"
+    : "do lance";
+}
+
+$("#analysis-mode-toggle").addEventListener("click", (event) => {
+  markingMode = markingMode === "analysis" ? "clip" : "analysis";
+  resetPendingMark();
+  updateMarkingMode();
+  event.currentTarget.blur();
+});
+
+function renderAnalysisPeriods() {
+  const list = $("#analysis-period-list");
+  list.replaceChildren();
+  $("#analysis-period-count").textContent = analysisPeriods.length;
+  $("#analysis-period-empty").classList.toggle(
+    "hidden",
+    analysisPeriods.length > 0,
+  );
+  analysisPeriods.forEach((period, index) => {
+    const item = document.createElement("li");
+    item.className = "analysis-period-item";
+    const play = document.createElement("button");
+    play.className = "clip-play";
+    play.textContent = "▶";
+    play.title = "Ir para o início deste período";
+    play.addEventListener("click", () => {
+      player.currentTime = period.start;
+      player.play();
+    });
+    const label = document.createElement("span");
+    label.className = "clip-label";
+    label.textContent = `Período ${String(index + 1).padStart(2, "0")}`;
+    const time = document.createElement("span");
+    time.className = "clip-time";
+    time.textContent = `${formatTime(period.start)} — ${formatTime(period.end)} · ${formatTime(period.end - period.start)}`;
+    const remove = document.createElement("button");
+    remove.className = "clip-remove";
+    remove.textContent = "Remover";
+    remove.addEventListener("click", () => {
+      analysisPeriods.splice(index, 1);
+      autoResult = null;
+      renderAnalysisPeriods();
+    });
+    item.append(play, label, time, remove);
+    list.append(item);
+  });
+}
+
+function analysisPeriodsKey(periods = analysisPeriods) {
+  return periods
+    .map((period) => `${period.start.toFixed(3)}:${period.end.toFixed(3)}`)
+    .join("|");
+}
 
 function renderClips() {
   const list = $("#clips-list");
@@ -378,7 +501,8 @@ function addSuggestedClips(kind, suggestions) {
   let added = 0;
   for (const item of suggestions[kind] || []) {
     // Não repete um trecho que já está na lista (por exemplo, ao pedir a sugestão duas vezes).
-    if (clips.some((clip) => clip.start < item.end && item.start < clip.end)) continue;
+    if (clips.some((clip) => clip.start < item.end && item.start < clip.end))
+      continue;
     clips.push({ start: item.start, end: item.end, auto: true });
     added += 1;
   }
@@ -394,28 +518,53 @@ $("#auto-button").addEventListener("click", async () => {
   const analyzed = mediaId;
   const shirt = $("#auto-shirt").value;
   const kind = $("#auto-kind").value;
+  const periods = analysisPeriods.map((period) => ({ ...period }));
+  const periodsKey = analysisPeriodsKey(periods);
   button.disabled = true;
   button.blur(); // devolve os atalhos do teclado (I, O, espaço, setas) ao player
   try {
     // A análise é a parte lenta e serve para ataques e defesas. Se já foi feita para este
     // vídeo e esta cor de camisa, só reaproveita o resultado.
-    if (!autoResult || autoResult.mediaId !== analyzed || autoResult.shirt !== shirt) {
+    if (
+      !autoResult ||
+      autoResult.mediaId !== analyzed ||
+      autoResult.shirt !== shirt ||
+      autoResult.periodsKey !== periodsKey
+    ) {
       setStatus(status, "Iniciando a análise…", "working");
       const { job_id } = await readError(
         await fetch("/api/suggest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ media_id: analyzed, shirt }),
+          body: JSON.stringify({ media_id: analyzed, shirt, periods }),
         }),
       );
       const job = await pollJob(
         job_id,
-        (job) => setStatus(status, job.message, job.status === "error" ? "error" : "working"),
+        (job) =>
+          setStatus(
+            status,
+            job.message,
+            job.status === "error" ? "error" : "working",
+          ),
         () => {},
       );
-      autoResult = { mediaId: analyzed, shirt, suggestions: job.suggestions };
+      autoResult = {
+        mediaId: analyzed,
+        shirt,
+        periodsKey,
+        suggestions: job.suggestions,
+      };
     }
     if (mediaId !== analyzed) return; // a pessoa trocou de vídeo durante a análise
+    if (analysisPeriodsKey() !== periodsKey) {
+      setStatus(
+        status,
+        "Os períodos foram alterados durante a análise. Clique em sugerir novamente.",
+        "working",
+      );
+      return;
+    }
     const found = (autoResult.suggestions[kind] || []).length;
     const added = addSuggestedClips(kind, autoResult.suggestions);
     const name = kind === "ataque" ? "ataque(s)" : "defesa(s)";
@@ -426,7 +575,11 @@ $("#auto-button").addEventListener("click", async () => {
         "success",
       );
     } else if (found) {
-      setStatus(status, `Os ${found} ${name} encontrado(s) já estão na lista.`, "success");
+      setStatus(
+        status,
+        `Os ${found} ${name} encontrado(s) já estão na lista.`,
+        "success",
+      );
     } else {
       setStatus(
         status,
@@ -452,10 +605,16 @@ $("#change-video").addEventListener("click", () => {
   player.load();
   mediaId = null;
   clips = [];
-  pendingStart = null;
+  resetPendingMark();
+  markingMode = "clip";
+  analysisPeriods = [];
   autoResult = null;
   setStatus($("#auto-status"), "", "");
+  renderAnalysisPeriods();
+  updateMarkingMode();
   $("#editor").classList.add("hidden");
+  $(".shell").classList.remove("editor-layout");
+  setSourceCollapsed(false);
   $("#video-file").value = "";
   $("#file-name").textContent = "Nenhum arquivo selecionado";
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -465,7 +624,8 @@ $("#change-video").addEventListener("click", () => {
 async function refreshMaintenance() {
   try {
     const data = await readError(await fetch("/api/maintenance"));
-    $("#ytdlp-version").textContent = `yt-dlp ${data.ytdlp_version} · ${data.used} em uso`;
+    $("#ytdlp-version").textContent =
+      `yt-dlp ${data.ytdlp_version} · ${data.used} em uso`;
   } catch {
     $("#ytdlp-version").textContent = "";
   }
@@ -487,10 +647,17 @@ async function runMaintenance(button, start) {
 $("#update-ytdlp").addEventListener("click", (event) =>
   runMaintenance(event.currentTarget, async (status) => {
     setStatus(status, "Procurando atualização do yt-dlp…", "working");
-    const { job_id } = await readError(await fetch("/api/update-ytdlp", { method: "POST" }));
+    const { job_id } = await readError(
+      await fetch("/api/update-ytdlp", { method: "POST" }),
+    );
     await pollJob(
       job_id,
-      (job) => setStatus(status, job.message, job.status === "error" ? "error" : "working"),
+      (job) =>
+        setStatus(
+          status,
+          job.message,
+          job.status === "error" ? "error" : "working",
+        ),
       (job) => setStatus(status, job.message, "success"),
     );
   }),
@@ -510,7 +677,11 @@ $("#cleanup").addEventListener("click", (event) => {
         body: JSON.stringify({ keep_media_id: mediaId }),
       }),
     );
-    setStatus(status, `Limpeza concluída: ${result.removed} item(ns), ${result.freed} liberados.`, "success");
+    setStatus(
+      status,
+      `Limpeza concluída: ${result.removed} item(ns), ${result.freed} liberados.`,
+      "success",
+    );
   });
 });
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import queue
 import shutil
@@ -736,27 +737,78 @@ def export():
     return jsonify(job_id=job_id), 202
 
 
-def suggest_worker(job_id: str, media_path: Path, mine_is_light: bool) -> None:
-    """Fase 2: acha os ataques e as defesas do time escolhido e devolve intervalos sugeridos."""
+def normalize_analysis_periods(value: object, duration: float) -> list[dict[str, float]]:
+    """Valida e junta períodos de análise sobrepostos.
+
+    Uma lista vazia mantém o comportamento anterior: analisar o vídeo inteiro. Os períodos são
+    normalizados no servidor para impedir trabalho duplicado e para nunca deixar o detector sair
+    da faixa que a pessoa delimitou.
+    """
+    if value is None or value == []:
+        return [{"start": 0.0, "end": duration}]
+    if not isinstance(value, list):
+        raise ValueError("Os períodos de análise precisam ser uma lista.")
+    periods: list[tuple[float, float]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("Um dos períodos de análise é inválido.")
+        try:
+            start, end = float(item["start"]), float(item["end"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Um dos períodos de análise é inválido.") from exc
+        if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start or start >= duration:
+            raise ValueError("Um dos períodos de análise é inválido.")
+        periods.append((start, min(end, duration)))
+    periods.sort()
+    merged: list[list[float]] = []
+    for start, end in periods:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [{"start": start, "end": end} for start, end in merged]
+
+
+def suggest_worker(job_id: str, media_path: Path, mine_is_light: bool,
+                   periods: list[dict[str, float]]) -> None:
+    """Acha ataques e defesas somente nos períodos escolhidos e devolve intervalos sugeridos."""
     try:
         # Importado só aqui: o YOLO (onnxruntime) só é carregado quando a pessoa pede a sugestão.
         import detector
 
         info = probe(media_path)
         started = time.perf_counter()
-        export_log(job_id, f"analisando {media_path.name} ({info['width']}x{info['height']}, "
-                           f"{fmt_time(info['duration'])}), camisa {'clara' if mine_is_light else 'escura'}", "sugestão")
+        selected_duration = sum(period["end"] - period["start"] for period in periods)
+        export_log(job_id, f"analisando {media_path.name} ({len(periods)} período(s), "
+                           f"{fmt_time(selected_duration)} de {fmt_time(info['duration'])}), camisa "
+                           f"{'clara' if mine_is_light else 'escura'}", "sugestão")
 
-        def progress(fraction: float) -> None:
-            finish_job(job_id, message=f"Analisando o vídeo… {fraction:.0%}", progress=round(fraction * 100))
+        person_detector = detector.PersonDetector()
+        period_samples: list[tuple[float, list[dict]]] = []
+        completed_seconds = 0.0
+        for number, period in enumerate(periods, 1):
+            section_duration = period["end"] - period["start"]
 
-        samples = detector.extract_samples(media_path, info["duration"], info["width"], info["height"],
-                                           progress=progress)
-        if not samples:
+            def progress(fraction: float, *, before: float = completed_seconds,
+                         section: float = section_duration) -> None:
+                total_fraction = (before + fraction * section) / max(selected_duration, 1.0)
+                finish_job(job_id, message=f"Analisando período {number}/{len(periods)}… {total_fraction:.0%}",
+                           progress=round(total_fraction * 100))
+
+            samples = detector.extract_samples(
+                media_path, info["duration"], info["width"], info["height"], start=period["start"],
+                end=period["end"], progress=progress, detector=person_detector,
+            )
+            period_samples.append((period["end"], samples))
+            completed_seconds += section_duration
+            progress(1.0)
+
+        sample_count = sum(len(samples) for _, samples in period_samples)
+        if not sample_count:
             raise ValueError("Não consegui ler imagens desse vídeo para analisar.")
-        suggestions = detector.suggest(samples, mine_is_light, duration=info["duration"])
+        suggestions = detector.suggest_periods(period_samples, mine_is_light)
         elapsed = time.perf_counter() - started
-        export_log(job_id, f"{len(samples)} quadros em {elapsed:.0f}s | "
+        export_log(job_id, f"{sample_count} quadros em {elapsed:.0f}s | "
                            f"{len(suggestions['ataque'])} ataque(s), {len(suggestions['defesa'])} defesa(s)", "sugestão")
         finish_job(job_id, status="done", progress=100, suggestions=suggestions,
                    message=f"Análise pronta: {len(suggestions['ataque'])} ataque(s) e "
@@ -780,12 +832,16 @@ def suggest_plays():
     shirt = str(data.get("shirt", "")).lower()
     if shirt not in {"clara", "escura"}:
         return jsonify(error="Informe se o seu time veste camisa clara ou escura."), 400
+    try:
+        periods = normalize_analysis_periods(data.get("periods"), probe(path)["duration"])
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
     with jobs_lock:
         busy = any(job["kind"] == "suggest" and job["status"] == "processing" for job in jobs.values())
     if busy:  # duas análises ao mesmo tempo disputariam a CPU e as duas ficariam lentas
         return jsonify(error="Já existe uma análise em andamento. Espere ela terminar."), 409
     job_id = add_job("suggest")
-    threading.Thread(target=suggest_worker, args=(job_id, path, shirt == "clara"), daemon=True).start()
+    threading.Thread(target=suggest_worker, args=(job_id, path, shirt == "clara", periods), daemon=True).start()
     return jsonify(job_id=job_id), 202
 
 

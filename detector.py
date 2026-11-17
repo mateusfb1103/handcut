@@ -115,12 +115,22 @@ def nms(boxes: np.ndarray, scores: np.ndarray, iou_limit: float) -> list[int]:
     return keep
 
 
-def read_frames(video: Path, duration: float, width: int, height: int, fps: float = SAMPLE_FPS):
-    """Entrega (segundo, quadro BGR) a `fps` quadros por segundo, lidos pelo FFmpeg em 480p."""
+def read_frames(video: Path, duration: float, width: int, height: int, fps: float = SAMPLE_FPS,
+                *, start: float = 0.0, end: float | None = None):
+    """Entrega (segundo, quadro BGR) de uma faixa do vídeo, em `fps` quadros por segundo.
+
+    `start` e `end` preservam o relógio original do vídeo nos valores devolvidos. Isso permite
+    analisar só alguns períodos sem perder as posições corretas das sugestões.
+    """
+    start = max(0.0, float(start))
+    end = min(duration, float(end)) if end is not None else duration
+    if end <= start:
+        return
     out_height = ANALYSIS_HEIGHT
     out_width = max(2, round(out_height * width / height / 2) * 2)  # largura par, como o FFmpeg exige
     command = [
-        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", str(video),
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-ss", f"{start:.3f}",
+        "-t", f"{end - start:.3f}", "-i", str(video),
         "-vf", f"fps={fps},scale={out_width}:{out_height}", "-an", "-f", "rawvideo", "-pix_fmt", "bgr24", "-",
     ]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -132,7 +142,7 @@ def read_frames(video: Path, duration: float, width: int, height: int, fps: floa
             data = process.stdout.read(frame_bytes)
             if len(data) < frame_bytes:
                 break
-            yield index / fps, np.frombuffer(data, dtype=np.uint8).reshape(out_height, out_width, 3)
+            yield start + index / fps, np.frombuffer(data, dtype=np.uint8).reshape(out_height, out_width, 3)
             index += 1
     finally:
         process.kill()
@@ -166,14 +176,21 @@ def frame_features(frame: np.ndarray, detector: PersonDetector) -> dict:
 
 def extract_samples(video: Path, duration: float, width: int, height: int, *,
                     progress: Callable[[float], None] | None = None,
-                    detector: PersonDetector | None = None, fps: float = SAMPLE_FPS) -> list[dict]:
-    """Passo lento: roda o YOLO nos quadros amostrados. Devolve uma lista de {t, people, green_x}."""
+                    detector: PersonDetector | None = None, fps: float = SAMPLE_FPS,
+                    start: float = 0.0, end: float | None = None) -> list[dict]:
+    """Roda o YOLO em uma faixa do vídeo e devolve {t, people, green_x}.
+
+    Quando `start`/`end` são informados, apenas aquela faixa é decodificada e enviada ao YOLO.
+    """
     detector = detector or PersonDetector()
+    start = max(0.0, float(start))
+    end = min(duration, float(end)) if end is not None else duration
+    section_duration = max(end - start, 0.0)
     samples = []
-    for t, frame in read_frames(video, duration, width, height, fps):
+    for t, frame in read_frames(video, duration, width, height, fps, start=start, end=end):
         samples.append({"t": round(t, 3), **frame_features(frame, detector)})
         if progress and len(samples) % 10 == 0:
-            progress(min(1.0, t / max(duration, 1.0)))
+            progress(min(1.0, (t - start) / max(section_duration, 1.0)))
     if progress:
         progress(1.0)
     return samples
@@ -261,3 +278,21 @@ def suggest(samples: list[dict], mine_is_light: bool, *, fps: float = SAMPLE_FPS
     labels = label_samples(samples, mine_is_light, fps=fps)
     return {kind: labels_to_segments(samples, labels, kind, fps=fps, duration=duration)
             for kind in (ATAQUE, DEFESA)}
+
+
+def suggest_periods(period_samples: list[tuple[float, list[dict]]], mine_is_light: bool, *,
+                    fps: float = SAMPLE_FPS) -> dict[str, list[dict]]:
+    """Sugere lances para períodos independentes, sem unir um ao outro.
+
+    O brilho que separa as camisas é calculado com todos os períodos selecionados, mas a
+    suavização e a conversão em segmentos acontecem período a período. Assim, uma sugestão nunca
+    ocupa uma lacuna que a pessoa escolheu não analisar.
+    """
+    all_samples = [sample for _, samples in period_samples for sample in samples]
+    threshold = light_threshold(all_samples)
+    result = {ATAQUE: [], DEFESA: []}
+    for end, samples in period_samples:
+        labels = label_samples(samples, mine_is_light, fps=fps, threshold=threshold)
+        for kind in result:
+            result[kind].extend(labels_to_segments(samples, labels, kind, fps=fps, duration=end))
+    return result
