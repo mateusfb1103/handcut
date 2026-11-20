@@ -785,10 +785,51 @@ footer code {
   font: 9px "DM Mono";
   color: var(--green);
 }
-.analysis-periods .secondary.active {
+.analysis-periods .secondary.active,
+.auto-actions .secondary.active {
   background: #314727;
   border-color: #719358;
   color: #ecf8e5;
+}
+#player.picking-shirt {
+  cursor: crosshair;
+  outline: 2px solid var(--green);
+}
+.shirt-picker-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: 10px;
+  padding: 9px 11px;
+  background: #0d120f;
+  border: 1px solid #28312c;
+  border-radius: 8px;
+}
+.shirt-picker-hint {
+  font-size: 10px;
+  color: #a8b2ab;
+}
+.shirt-swatches {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.shirt-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #e9eee9;
+  color: #fff;
+  text-shadow: 0 1px 2px #000;
+  font: 700 12px/1 "DM Sans";
+  cursor: pointer;
+  padding: 0;
+}
+.shirt-swatch-note {
+  font-size: 10px;
+  color: var(--green);
 }
 .analysis-period-empty {
   margin-top: 9px;

@@ -44,15 +44,17 @@ Aplicativo local para carregar um vídeo `.mp4` ou `.webm` (ou baixar um vídeo 
 
 Os intervalos são exportados na ordem do jogo. A margem padrão adiciona 3 segundos antes e depois de cada intervalo, limitada ao começo e ao fim do vídeo. A exportação reencoda em H.264 para permitir cortes precisos. Arquivos carregados ficam em `media/`; resultados ficam em `exports/`.
 
-## Sugestão automática de lances (Fase 2)
+## Sugestão automática de lances (Fase 2 — protótipo experimental na branch `fase2-yolo`)
+
+> **Aviso:** nesta branch, a Fase 2 é um protótipo local em validação (não empacotar para distribuição nem mesclar à `main` antes de concluir a prova de viabilidade, a definição de licença do modelo, o salvamento de marcações e a Etapa C).
 
 Com um vídeo aberto, o bloco "Sugestão automática" analisa o jogo e adiciona à lista os trechos de ataque ou de defesa do seu time (marcados como "sugerido"). Você revisa, remove o que estiver errado e exporta como de costume.
 
 - Escolha se o seu time veste camisa **clara** ou **escura** e se quer **ataques** ou **defesas**.
-- Para vídeos com mais de um jogo, clique em **Marcar períodos de análise**. Os botões/atalhos `I` e `O` passam a delimitar um período; repita para adicionar quantos períodos precisar. Só esses trechos seguem para o YOLO. Clique novamente no botão para voltar a marcar lances manualmente. Sem períodos delimitados, a análise continua cobrindo o vídeo inteiro.
+- Para vídeos com mais de um jogo, clique em **Marcar períodos de análise**. Os botões/atalhos `I` e `O` passam a delimitar um período; repita para adicionar quantos períodos precisar. **Recomendação:** deixe cerca de **5 segundos de folga** antes e depois de cada trecho relevante para que a suavização nas bordas não descarte lances próximos ao início ou ao fim do período. Só esses trechos seguem para o YOLO. Clique novamente no botão para voltar a marcar lances manualmente. Sem períodos delimitados, a análise continua cobrindo o vídeo inteiro.
 - Um modelo YOLO (`models/yolo11n.onnx`) acha os jogadores, a cor da camisa separa os times e o time mais perto do gol é o que defende. O código está em `detector.py`.
-- Roda só na CPU. Em testes, analisar leva cerca de 0,2x da duração selecionada em um núcleo (1 hora de vídeo ≈ 12 minutos).
-- Para medir o quanto acerta em outro jogo, anote os lances reais e rode `python tools/avaliar_deteccao.py VIDEO.mp4 GABARITO.txt --camisa clara` (o formato do gabarito está no começo do script).
+- Roda só na CPU (usando todos os núcleos disponíveis menos um, para não travar a interface). Em testes preliminares na máquina de desenvolvimento, analisar levou cerca de 0,23x da duração selecionada em 480p (ex.: 37m48s em ~8m48s); o desempenho varia conforme o computador e ainda está em validação.
+- Para medir o quanto acerta em outro jogo, anote os lances reais e rode `python tools/avaliar_deteccao.py VIDEO.mp4 GABARITO.txt --camisa clara` (o formato do gabarito está no começo do script e em `.md/Protocolo de Testes Fase 2.md`).
 
 ## Observações
 

@@ -7,7 +7,9 @@ let pendingMarkTarget = null;
 let markingMode = "clip";
 let analysisPeriods = [];
 let busy = false;
-let autoResult = null; // última análise automática: { mediaId, shirt, suggestions }
+let autoResult = null; // última análise automática: { mediaId, shirtKey, periodsKey, suggestions }
+let pickingShirt = false;
+let pickedShirtColors = []; // [[r, g, b], ...] clicadas na camisa de jogadores do meu time
 
 function formatTime(seconds) {
   const value = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -78,6 +80,9 @@ function enterEditor(data) {
   markingMode = "clip";
   analysisPeriods = [];
   autoResult = null;
+  pickedShirtColors = [];
+  setPickingShirt(false);
+  renderShirtPicks();
   setStatus($("#auto-status"), "", "");
   $("#editor").classList.remove("hidden");
   $(".shell").classList.add("editor-layout");
@@ -497,6 +502,140 @@ $("#export-button").addEventListener("click", async () => {
 });
 
 // ---- Sugestão automática (Fase 2) ----
+function medianChannel(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] || 0;
+}
+
+function samplePlayerColor(event) {
+  if (!player.videoWidth || !player.videoHeight) return null;
+  const rect = player.getBoundingClientRect();
+  // Ignora cliques na barra inferior de controles nativos do player.
+  if (event.clientY > rect.bottom - 44) return null;
+  const videoRatio = player.videoWidth / player.videoHeight;
+  const boxRatio = rect.width / rect.height;
+  let drawW = rect.width;
+  let drawH = rect.height;
+  let offsetX = 0;
+  let offsetY = 0;
+  if (boxRatio > videoRatio) {
+    drawW = rect.height * videoRatio;
+    offsetX = (rect.width - drawW) / 2;
+  } else {
+    drawH = rect.width / videoRatio;
+    offsetY = (rect.height - drawH) / 2;
+  }
+  const relX = (event.clientX - rect.left - offsetX) / drawW;
+  const relY = (event.clientY - rect.top - offsetY) / drawH;
+  if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return null;
+
+  const canvas = document.createElement("canvas");
+  const scale = Math.min(1, 854 / player.videoWidth);
+  canvas.width = Math.max(1, Math.round(player.videoWidth * scale));
+  canvas.height = Math.max(1, Math.round(player.videoHeight * scale));
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(player, 0, 0, canvas.width, canvas.height);
+
+  const cx = Math.min(canvas.width - 1, Math.max(0, Math.round(relX * canvas.width)));
+  const cy = Math.min(canvas.height - 1, Math.max(0, Math.round(relY * canvas.height)));
+  const x0 = Math.max(0, cx - 3);
+  const y0 = Math.max(0, cy - 3);
+  const w = Math.min(canvas.width - x0, 7);
+  const h = Math.min(canvas.height - y0, 7);
+  const pixels = ctx.getImageData(x0, y0, w, h).data;
+  const rs = [];
+  const gs = [];
+  const bs = [];
+  for (let i = 0; i < pixels.length; i += 4) {
+    rs.push(pixels[i]);
+    gs.push(pixels[i + 1]);
+    bs.push(pixels[i + 2]);
+  }
+  return [medianChannel(rs), medianChannel(gs), medianChannel(bs)];
+}
+
+function setPickingShirt(active) {
+  pickingShirt = Boolean(active);
+  if (pickingShirt && !player.paused) player.pause();
+  player.classList.toggle("picking-shirt", pickingShirt);
+  const toggle = $("#pick-shirt-toggle");
+  toggle.classList.toggle("active", pickingShirt);
+  toggle.setAttribute("aria-pressed", String(pickingShirt));
+  toggle.textContent = pickingShirt
+    ? "Concluir seleção no vídeo"
+    : "Clicar na camisa no vídeo";
+  renderShirtPicks();
+}
+
+function renderShirtPicks() {
+  const bar = $("#shirt-picker-bar");
+  const swatches = $("#shirt-swatches");
+  const hint = $("#pick-shirt-hint");
+  const clear = $("#clear-shirt-picks");
+  const hasPicks = pickedShirtColors.length > 0;
+  bar.classList.toggle("hidden", !pickingShirt && !hasPicks);
+  hint.hidden = !pickingShirt && hasPicks;
+  clear.hidden = !hasPicks;
+  clear.classList.toggle("hidden", !hasPicks);
+  swatches.replaceChildren();
+  pickedShirtColors.forEach((rgb, index) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "shirt-swatch";
+    chip.style.backgroundColor = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+    chip.title = `Amostra ${index + 1} (clique para remover)`;
+    chip.textContent = "×";
+    chip.addEventListener("click", () => {
+      pickedShirtColors.splice(index, 1);
+      autoResult = null;
+      renderShirtPicks();
+    });
+    swatches.append(chip);
+  });
+  if (hasPicks && !pickingShirt) {
+    const note = document.createElement("span");
+    note.className = "shirt-swatch-note";
+    note.textContent = `${pickedShirtColors.length} amostra(s) clicada(s) — têm prioridade sobre "Meu time veste"`;
+    swatches.append(note);
+  }
+}
+
+$("#pick-shirt-toggle").addEventListener("click", (event) => {
+  if (!mediaId) return;
+  setPickingShirt(!pickingShirt);
+  event.currentTarget.blur();
+});
+
+$("#clear-shirt-picks").addEventListener("click", (event) => {
+  pickedShirtColors = [];
+  autoResult = null;
+  renderShirtPicks();
+  event.currentTarget.blur();
+});
+
+player.addEventListener(
+  "click",
+  (event) => {
+    if (!pickingShirt || !mediaId) return;
+    const rgb = samplePlayerColor(event);
+    if (!rgb) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (pickedShirtColors.length >= 10) pickedShirtColors.shift();
+    pickedShirtColors.push(rgb);
+    autoResult = null;
+    renderShirtPicks();
+  },
+  { capture: true },
+);
+
+function shirtConfigKey(shirt, shirtColors) {
+  if (shirtColors.length) {
+    return "clicks:" + shirtColors.map((c) => c.join(",")).join(";");
+  }
+  return `select:${shirt}`;
+}
+
 function addSuggestedClips(kind, suggestions) {
   let added = 0;
   for (const item of suggestions[kind] || []) {
@@ -513,10 +652,13 @@ function addSuggestedClips(kind, suggestions) {
 
 $("#auto-button").addEventListener("click", async () => {
   if (!mediaId) return;
+  setPickingShirt(false);
   const button = $("#auto-button");
   const status = $("#auto-status");
   const analyzed = mediaId;
   const shirt = $("#auto-shirt").value;
+  const shirtColors = pickedShirtColors.map((c) => [...c]);
+  const shirtKey = shirtConfigKey(shirt, shirtColors);
   const kind = $("#auto-kind").value;
   const periods = analysisPeriods.map((period) => ({ ...period }));
   const periodsKey = analysisPeriodsKey(periods);
@@ -528,7 +670,7 @@ $("#auto-button").addEventListener("click", async () => {
     if (
       !autoResult ||
       autoResult.mediaId !== analyzed ||
-      autoResult.shirt !== shirt ||
+      autoResult.shirtKey !== shirtKey ||
       autoResult.periodsKey !== periodsKey
     ) {
       setStatus(status, "Iniciando a análise…", "working");
@@ -536,7 +678,12 @@ $("#auto-button").addEventListener("click", async () => {
         await fetch("/api/suggest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ media_id: analyzed, shirt, periods }),
+          body: JSON.stringify({
+            media_id: analyzed,
+            shirt,
+            shirt_colors: shirtColors,
+            periods,
+          }),
         }),
       );
       const job = await pollJob(
@@ -551,9 +698,10 @@ $("#auto-button").addEventListener("click", async () => {
       );
       autoResult = {
         mediaId: analyzed,
-        shirt,
+        shirtKey,
         periodsKey,
         suggestions: job.suggestions,
+        warnings: job.warnings || [],
       };
     }
     if (mediaId !== analyzed) return; // a pessoa trocou de vídeo durante a análise
@@ -568,17 +716,25 @@ $("#auto-button").addEventListener("click", async () => {
     const found = (autoResult.suggestions[kind] || []).length;
     const added = addSuggestedClips(kind, autoResult.suggestions);
     const name = kind === "ataque" ? "ataque(s)" : "defesa(s)";
+    const warnings = autoResult.warnings || [];
+    const warnSuffix = warnings.length ? ` Aviso: ${warnings.join(" ")}` : "";
     if (added) {
       setStatus(
         status,
-        `${added} ${name} sugerido(s) e adicionado(s) à lista. Confira cada um no ▶ antes de exportar.`,
-        "success",
+        `${added} ${name} sugerido(s) e adicionado(s) à lista. Confira cada um no ▶ antes de exportar.${warnSuffix}`,
+        warnings.length ? "working" : "success",
       );
     } else if (found) {
       setStatus(
         status,
-        `Os ${found} ${name} encontrado(s) já estão na lista.`,
-        "success",
+        `Os ${found} ${name} encontrado(s) já estão na lista.${warnSuffix}`,
+        warnings.length ? "working" : "success",
+      );
+    } else if (warnings.length) {
+      setStatus(
+        status,
+        `Não encontrei ${name} neste trecho. ${warnings.join(" ")}`,
+        "error",
       );
     } else {
       setStatus(
@@ -596,7 +752,17 @@ $("#auto-button").addEventListener("click", async () => {
 
 // Tira o foco do seletor para os atalhos I, O, espaço e setas voltarem a funcionar.
 $("#resolution").addEventListener("change", (event) => event.target.blur());
-$("#auto-shirt").addEventListener("change", (event) => event.target.blur());
+$("#auto-shirt").addEventListener("change", (event) => {
+  autoResult = null;
+  if (pickedShirtColors.length) {
+    setStatus(
+      $("#auto-status"),
+      `Você ainda tem ${pickedShirtColors.length} amostra(s) clicada(s) no vídeo (têm prioridade). Clique em "Limpar amostras" se quiser usar só o seletor.`,
+      "working",
+    );
+  }
+  event.target.blur();
+});
 $("#auto-kind").addEventListener("change", (event) => event.target.blur());
 
 $("#change-video").addEventListener("click", () => {
@@ -609,6 +775,9 @@ $("#change-video").addEventListener("click", () => {
   markingMode = "clip";
   analysisPeriods = [];
   autoResult = null;
+  pickedShirtColors = [];
+  setPickingShirt(false);
+  renderShirtPicks();
   setStatus($("#auto-status"), "", "");
   renderAnalysisPeriods();
   updateMarkingMode();

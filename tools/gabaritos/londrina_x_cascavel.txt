@@ -1,0 +1,10 @@
+# Conjunto de Ajuste 1 — Londrina-X-Cascavel.mp4 (3:00, 852x480, 30 fps)
+# Quadra: inteiramente azul (sem piso verde) | Placar na tela: não | Emendas: nenhuma
+# Time de referência: Londrina (camisa preta) | Adversário (--inverter): Cascavel (camisa amarela)
+
+ataque 0:08 0:35
+ataque 0:42 0:51
+ataque 1:20 1:43
+defesa 2:00 2:07
+ataque 2:25 2:38
+ataque 2:42 2:59

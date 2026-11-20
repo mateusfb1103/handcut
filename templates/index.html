@@ -164,7 +164,8 @@
                     >
                     <p>
                       Use os mesmos botões <kbd>I</kbd> e <kbd>O</kbd> para
-                      marcar início e fim.
+                      marcar início e fim. Deixe cerca de 5 s antes e depois do
+                      trecho para não cortar lances nas bordas.
                     </p>
                   </div>
                   <button
@@ -186,8 +187,12 @@
                 <label class="margin-control"
                   >Meu time veste
                   <select id="auto-shirt">
-                    <option value="clara">camisa clara</option>
-                    <option value="escura">camisa escura</option>
+                    <option value="clara">camisa clara / branca</option>
+                    <option value="escura">camisa escura / preta</option>
+                    <option value="amarela">camisa amarela</option>
+                    <option value="vermelha">camisa vermelha / laranja</option>
+                    <option value="azul">camisa azul</option>
+                    <option value="verde">camisa verde</option>
                   </select></label
                 >
                 <label class="margin-control"
@@ -197,8 +202,30 @@
                     <option value="ataque">ataques</option>
                   </select></label
                 >
+                <button
+                  id="pick-shirt-toggle"
+                  class="button secondary"
+                  type="button"
+                  aria-pressed="false"
+                >
+                  Clicar na camisa no vídeo
+                </button>
                 <button id="auto-button" class="button secondary" type="button">
                   Sugerir lances
+                </button>
+              </div>
+              <div id="shirt-picker-bar" class="shirt-picker-bar hidden">
+                <span id="pick-shirt-hint" class="shirt-picker-hint"
+                  >Pause o vídeo e clique no meio da camisa de 1 ou mais
+                  jogadores do seu time (evite piso, bordas ou números).</span
+                >
+                <div id="shirt-swatches" class="shirt-swatches"></div>
+                <button
+                  id="clear-shirt-picks"
+                  class="text-button hidden"
+                  type="button"
+                >
+                  Limpar amostras
                 </button>
               </div>
               <div id="auto-status" class="status" aria-live="polite"></div>
