@@ -26,7 +26,7 @@ import cv2
 import numpy as np
 
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-MODEL_FILE = RESOURCE_DIR / "models" / "yolo11n.onnx"
+MODEL_FILE = RESOURCE_DIR / "models" / "yolox_s.onnx"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # ---- Leitura do vídeo ----
@@ -34,8 +34,8 @@ SAMPLE_FPS = 2.0        # quadros analisados por segundo de vídeo
 ANALYSIS_HEIGHT = 480   # os quadros são reduzidos para esta altura (o mesmo do download do YouTube)
 
 # ---- Detecção de pessoas ----
-PERSON_CLASS = 0        # "pessoa" na lista de 80 classes do YOLO
-CONF_MIN = 0.20         # confiança mínima de uma detecção
+PERSON_CLASS = 0        # "pessoa" na lista de 80 classes do COCO
+CONF_MIN = 0.25         # confiança mínima (obj_conf * cls_conf) no YOLOX-s
 NMS_IOU = 0.45          # caixas que se sobrepõem mais que isso são tratadas como a mesma pessoa
 MIN_PERSON_HEIGHT = 0.06   # pessoa menor que 6% da altura do quadro é ruído/torcida distante
 MIN_FOOT_Y = 0.24          # piso duro superior quando a máscara da quadra ainda não isolou a linha
@@ -63,10 +63,50 @@ ATAQUE, DEFESA, INDEF = "ataque", "defesa", "indef"
 # =====================================================================================
 # Passo 1 e 2: ler o vídeo e achar as pessoas
 # =====================================================================================
-class PersonDetector:
-    """Acha pessoas em um quadro BGR (OpenCV) com um modelo YOLO em ONNX, só na CPU."""
+def _build_yolox_grids(input_height: int, input_width: int,
+                       strides: tuple[int, ...] = (8, 16, 32)) -> tuple[np.ndarray, np.ndarray]:
+    """Pré-calcula a grade `(x, y)` e o stride de cada âncora do YOLOX (saída `(N, 85)`)."""
+    grids: list[np.ndarray] = []
+    expanded_strides: list[np.ndarray] = []
+    for stride in strides:
+        hsize, wsize = input_height // stride, input_width // stride
+        xv, yv = np.meshgrid(np.arange(wsize, dtype=np.float32), np.arange(hsize, dtype=np.float32))
+        grid = np.stack((xv, yv), axis=2).reshape(-1, 2)
+        grids.append(grid)
+        expanded_strides.append(np.full((grid.shape[0], 1), stride, dtype=np.float32))
+    return np.concatenate(grids, axis=0), np.concatenate(expanded_strides, axis=0)
 
-    def __init__(self, model_file: Path = MODEL_FILE, threads: int | None = None):
+
+def _decode_yolox(output: np.ndarray, grids: np.ndarray, strides: np.ndarray, ratio: float,
+                  frame_width: int, frame_height: int, conf_min: float = CONF_MIN) -> np.ndarray:
+    """Decodifica a saída `(N, 85)` do YOLOX para caixas `[x1, y1, x2, y2, conf]` em pixels originais."""
+    scores = output[:, 4] * output[:, 5 + PERSON_CLASS]
+    keep = scores >= conf_min
+    if not keep.any():
+        return np.zeros((0, 5), dtype=np.float32)
+
+    scores = scores[keep]
+    raw = output[keep, :4]
+    cxcy = (raw[:, :2] + grids[keep]) * strides[keep]
+    wh = np.exp(raw[:, 2:4]) * strides[keep]
+
+    boxes = np.empty((len(scores), 4), dtype=np.float32)
+    boxes[:, 0] = (cxcy[:, 0] - wh[:, 0] * 0.5) / ratio
+    boxes[:, 1] = (cxcy[:, 1] - wh[:, 1] * 0.5) / ratio
+    boxes[:, 2] = (cxcy[:, 0] + wh[:, 0] * 0.5) / ratio
+    boxes[:, 3] = (cxcy[:, 1] + wh[:, 1] * 0.5) / ratio
+
+    chosen = nms(boxes, scores, NMS_IOU)
+    boxes, scores = boxes[chosen], scores[chosen]
+    boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0, frame_width)
+    boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0, frame_height)
+    return np.concatenate([boxes, scores[:, None]], axis=1)
+
+
+class PersonDetector:
+    """Acha pessoas em um quadro BGR (OpenCV) com o modelo YOLOX-s em ONNX (Apache-2.0), só na CPU."""
+
+    def __init__(self, model_file: Path = MODEL_FILE, threads: int | None = None, conf_min: float = CONF_MIN):
         import onnxruntime as ort  # importado aqui para o app abrir rápido se a Fase 2 não for usada
 
         options = ort.SessionOptions()
@@ -75,35 +115,23 @@ class PersonDetector:
         self.session = ort.InferenceSession(str(model_file), options, providers=["CPUExecutionProvider"])
         model_input = self.session.get_inputs()[0]
         self.input_name = model_input.name
-        # O tamanho da entrada é fixo e vem do próprio modelo (no yolo11n.onnx atual: 544 x 960).
+        # O tamanho da entrada é fixo e vem do próprio modelo (no yolox_s.onnx oficial: 640 x 640).
         self.input_height, self.input_width = int(model_input.shape[2]), int(model_input.shape[3])
+        self.conf_min = conf_min
+        self.grids, self.strides = _build_yolox_grids(self.input_height, self.input_width)
 
     def detect(self, frame: np.ndarray) -> np.ndarray:
         """Devolve um array (N, 5) com x1, y1, x2, y2 e confiança de cada pessoa, em pixels do quadro."""
         frame_height, frame_width = frame.shape[:2]
-        # Redimensiona mantendo a proporção e completa as bordas com cinza (o formato que o YOLO espera).
+        # Pré-processamento oficial do YOLOX: BGR em 0..255, letterbox com cinza 114 alinhado em (0, 0).
         ratio = min(self.input_width / frame_width, self.input_height / frame_height)
-        new_width, new_height = round(frame_width * ratio), round(frame_height * ratio)
-        pad_x, pad_y = (self.input_width - new_width) // 2, (self.input_height - new_height) // 2
+        new_width, new_height = int(frame_width * ratio), int(frame_height * ratio)
         canvas = np.full((self.input_height, self.input_width, 3), 114, dtype=np.uint8)
-        canvas[pad_y:pad_y + new_height, pad_x:pad_x + new_width] = cv2.resize(
+        canvas[:new_height, :new_width] = cv2.resize(
             frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
-        blob = canvas[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0  # BGR -> RGB
-        output = self.session.run(None, {self.input_name: np.ascontiguousarray(blob)})[0][0]  # (84, N)
-
-        scores = output[4 + PERSON_CLASS]
-        keep = scores >= CONF_MIN
-        if not keep.any():
-            return np.zeros((0, 5), dtype=np.float32)
-        scores = scores[keep]
-        cx, cy, w, h = output[0][keep], output[1][keep], output[2][keep], output[3][keep]
-        boxes = np.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], axis=1)
-        chosen = nms(boxes, scores, NMS_IOU)
-        boxes, scores = boxes[chosen], scores[chosen]
-        # Volta para os pixels do quadro original (desfaz o redimensionamento e as bordas).
-        boxes[:, [0, 2]] = np.clip((boxes[:, [0, 2]] - pad_x) / ratio, 0, frame_width)
-        boxes[:, [1, 3]] = np.clip((boxes[:, [1, 3]] - pad_y) / ratio, 0, frame_height)
-        return np.concatenate([boxes, scores[:, None]], axis=1)
+        blob = np.ascontiguousarray(canvas.transpose(2, 0, 1)[None], dtype=np.float32)
+        output = self.session.run(None, {self.input_name: blob})[0][0]  # (N, 85)
+        return _decode_yolox(output, self.grids, self.strides, ratio, frame_width, frame_height, self.conf_min)
 
 
 def nms(boxes: np.ndarray, scores: np.ndarray, iou_limit: float) -> list[int]:

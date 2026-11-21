@@ -135,6 +135,40 @@ class DetectorTimeAndEdgesTests(unittest.TestCase):
         segs = detector.labels_to_segments(play_samples, play_labels, detector.ATAQUE)
         self.assertEqual(segs, [{"start": 0.0, "end": 8.5}])
 
+    def test_yolox_grid_and_decode_filters_person_scales_and_applies_nms(self):
+        grids, strides = detector._build_yolox_grids(640, 640)
+        self.assertEqual(grids.shape, (8400, 2))
+        self.assertEqual(strides.shape, (8400, 1))
+
+        # Constrói saída sintética (8400, 85):
+        # - âncora 0 (stride=8, grid=(0,0)): pessoa forte em cx=16, cy=24, w=16, h=32 (na escala 640)
+        # - âncora 1 (stride=8, grid=(1,0)): caixa quase sobreposta com score menor (deve sumir no NMS)
+        # - âncora 2: outra classe (cls=1) com confiança alta e person=0.05 (deve ser descartada)
+        out = np.zeros((8400, 85), dtype=np.float32)
+        out[0, :4] = [2.0, 3.0, np.log(2.0), np.log(4.0)]
+        out[0, 4] = 0.90
+        out[0, 5 + detector.PERSON_CLASS] = 0.80  # score = 0.72
+
+        out[1, :4] = [1.1, 3.0, np.log(2.0), np.log(4.0)]
+        out[1, 4] = 0.60
+        out[1, 5 + detector.PERSON_CLASS] = 0.60  # score = 0.36 (sobrepõe âncora 0 -> NMS)
+
+        out[2, :4] = [10.0, 10.0, np.log(3.0), np.log(3.0)]
+        out[2, 4] = 0.95
+        out[2, 5 + detector.PERSON_CLASS] = 0.05  # score pessoa = 0.0475 < 0.25
+        out[2, 6] = 0.99                          # outra classe
+
+        # ratio=0.5 -> dobra coordenadas na volta ao quadro original 1280x720
+        dets = detector._decode_yolox(out, grids, strides, ratio=0.5, frame_width=1280, frame_height=720, conf_min=0.25)
+        self.assertEqual(dets.shape, (1, 5))
+        # cx=16, cy=24, w=16, h=32 -> [8, 8, 24, 40] / 0.5 = [16, 16, 48, 80]
+        np.testing.assert_allclose(dets[0, :4], [16.0, 16.0, 48.0, 80.0], atol=1e-3)
+        self.assertAlmostEqual(float(dets[0, 4]), 0.72, places=3)
+
+        self.assertEqual(detector.MODEL_FILE.name, "yolox_s.onnx")
+        self.assertTrue((detector.MODEL_FILE.parent / "LICENSE-YOLOX.txt").is_file())
+        self.assertTrue((detector.MODEL_FILE.parent / "NOTICE").is_file())
+
 
 class TeamColorSeparationTests(unittest.TestCase):
     def test_separates_same_luminance_yellow_vs_red_and_black_vs_blue_in_lab(self):

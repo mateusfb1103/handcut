@@ -20,7 +20,8 @@ APP_NAME = "Handcut"
 SUFFIX = ".exe" if os.name == "nt" else ""
 REQUIRED_TOOLS = [f"{name}{SUFFIX}" for name in ("ffmpeg", "ffprobe", "deno", "yt-dlp")]
 ICON_PATH = ROOT / "handcut.ico"
-MODEL_PATH = ROOT / "models" / "yolo11n.onnx"  # modelo YOLO da sugestão automática (Fase 2)
+MODEL_PATH = ROOT / "models" / "yolox_s.onnx"  # modelo YOLOX-s Apache-2.0 da sugestão automática (Fase 2)
+MODEL_LICENSE_FILES = (ROOT / "models" / "LICENSE-YOLOX.txt", ROOT / "models" / "NOTICE")
 
 def check_vendor() -> None:
     vendor = ROOT / "vendor"
@@ -28,7 +29,10 @@ def check_vendor() -> None:
     if not ICON_PATH.is_file():
         sys.exit(f"Ícone não encontrado: {ICON_PATH}")
     if not MODEL_PATH.is_file():
-        sys.exit(f"Modelo YOLO não encontrado: {MODEL_PATH}")
+        sys.exit(f"Modelo YOLOX não encontrado: {MODEL_PATH}")
+    missing_license = [str(p) for p in MODEL_LICENSE_FILES if not p.is_file()]
+    if missing_license:
+        sys.exit("Faltam arquivos obrigatórios de licença Apache-2.0 do modelo:\n  " + "\n  ".join(missing_license))
 
     missing = [name for name in REQUIRED_TOOLS if not (vendor / name).is_file()]
     if missing:

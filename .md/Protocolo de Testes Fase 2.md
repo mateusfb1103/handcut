@@ -62,6 +62,10 @@ Preencher uma linha para cada execução oficial (gerada por `tools/avaliar_dete
 | 2026-11-19 | 2B (Cego) / `yolo11n.onnx` (480p) | `Pato x Cascavel.mp4` — DEFESA (`escura`, madeira sem verde + banco, emenda 3:49.5) | i5-8250U @ 1.60GHz (8 núcl., 11.9 GB RAM, Win 11) | 362.0 s | 127.2 s (`0.35×`) | 100% (6/6) | 0.00 (0/4) | 0 | ~8.0 min | **PASSA** |
 | 2026-11-19 | 2B (Cego) / `yolo11n.onnx` (480p) | `Londrina x Pato.mp4` — ATAQUE (`escura`, azul+vôlei cinza+rede, preto×azul, emenda 2:30.5) | i5-8250U @ 1.60GHz (8 núcl., 11.9 GB RAM, Win 11) | 321.3 s | 116.6 s (`0.36×`) | 50% (2/4) | 1.50 (3/2) | 0 | ~11.2 min | **REPROVA** |
 | 2026-11-19 | 2B (Cego) / `yolo11n.onnx` (480p) | `Londrina x Pato.mp4` — DEFESA (`escura`, azul+vôlei cinza+rede, preto×azul, emenda 2:30.5) | i5-8250U @ 1.60GHz (8 núcl., 11.9 GB RAM, Win 11) | 321.3 s | 116.6 s (`0.36×`) | 83% (5/6) | 0.17 (1/6) | 1 | ~17.6 min | **REPROVA** |
+| 2026-11-20 | 3B / `yolox_s.onnx` (`Apache-2.0`, 480p) | `Londrina-X-Cascavel.mp4` — ATAQUE (`escura`, quadra azul, sem períodos) | i5-8250U @ 1.60GHz (8 núcl., 11.9 GB RAM, Win 11) | 180.2 s | 78.1 s (`0.43×`) | 100% (5/5) | 0.00 (0/3) | 0 | ~12.0 min | **PASSA** |
+| 2026-11-20 | 3B / `yolox_s.onnx` (`Apache-2.0`, 480p) | `Londrina-X-Cascavel.mp4` — DEFESA (`escura`, quadra azul, sem períodos) | i5-8250U @ 1.60GHz (8 núcl., 11.9 GB RAM, Win 11) | 180.2 s | 78.1 s (`0.43×`) | 100% (1/1) | 0.00 (0/1) | 0 | ~4.0 min | **PASSA** |
+| 2026-11-20 | 3B / `yolox_s.onnx` (`Apache-2.0`, 480p) | `Londrina x Cascavel Final4.mp4` — ATAQUE (`clara`, madeira+verde, sem períodos) | i5-8250U @ 1.60GHz (8 núcl., 11.9 GB RAM, Win 11) | 169.2 s | 73.5 s (`0.43×`) | 100% (3/3) | 0.00 (0/3) | 0 | ~12.8 min | **PASSA** |
+| 2026-11-20 | 3B / `yolox_s.onnx` (`Apache-2.0`, 480p) | `Londrina x Cascavel Final4.mp4` — DEFESA (`clara`, madeira+verde, sem períodos) | i5-8250U @ 1.60GHz (8 núcl., 11.9 GB RAM, Win 11) | 169.2 s | 73.5 s (`0.43×`) | 100% (2/2) | 0.00 (0/1, 1 neutra) | 0 | ~8.5 min | **PASSA** |
 
 ### Teste N3 — 2º tempo isolado (`--periodos` / FFmpeg `-ss`) vs vídeo inteiro (2026-11-19)
 
