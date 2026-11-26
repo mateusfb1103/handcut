@@ -1,0 +1,9 @@
+Handcut — Third-Party Model Notice
+
+This distribution includes the pre-trained object detection model `yolox_s.onnx`
+from Megvii-BaseDetection/YOLOX (release 0.1.1rc0):
+
+  Project:   YOLOX (https://github.com/Megvii-BaseDetection/YOLOX)
+  Copyright: Copyright (c) Megvii, Inc. and its affiliates.
+  License:   Apache License, Version 2.0 (see LICENSE-YOLOX.txt in this folder)
+  Asset:     yolox_s.onnx (SHA-256 prefix: c5c2d13e59ae883e)

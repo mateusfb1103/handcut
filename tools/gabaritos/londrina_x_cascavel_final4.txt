@@ -1,0 +1,15 @@
+# Conjunto de Ajuste 2 — Londrina x Cascavel Final4.mp4 (2:49, 854x480, 30 fps)
+# Quadra: madeira com área e círculo central verdes | Placar na tela: sim
+# Time de referência: Londrina (camisa branca) | Adversário (--inverter): Cascavel (camisa preta)
+# Emenda identificada pela troca do relógio (30:00 -> 00:00) em 1:22.5; ±5 s são excluídos.
+# Encerramento animado do Handcut em 2:46.2–2:49.2.
+
+emenda 1:22.5
+ignorar 2:46 2:50
+
+ataque 0:20 0:44
+defesa 0:45 0:52 opcional   # Obs. do autor: situação quase de contra-ataque (para Cascavel é ataque)
+ataque 1:10 1:17
+ataque 1:34 2:02
+defesa 2:09 2:18
+defesa 2:23 2:37
