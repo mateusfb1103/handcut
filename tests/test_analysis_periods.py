@@ -169,6 +169,49 @@ class DetectorTimeAndEdgesTests(unittest.TestCase):
         self.assertTrue((detector.MODEL_FILE.parent / "LICENSE-YOLOX.txt").is_file())
         self.assertTrue((detector.MODEL_FILE.parent / "NOTICE").is_file())
 
+    def test_closeup_filter_suppresses_timeout_huddles_and_stays_dormant_on_wide_camera(self):
+        # 16 quadros de câmera aberta (p75_h=0.20, floor_cov=0.52) + 8 quadros de tempo técnico (p75_h=0.52, floor_cov=0.24)
+        wide = [{"t": i * 0.5, "cov_diff": 0.24, "end_score": 0.8, "p75_h": 0.20, "floor_cov": 0.52} for i in range(16)]
+        huddle = [{"t": (16 + i) * 0.5, "cov_diff": 0.05, "end_score": 0.8, "p75_h": 0.52, "floor_cov": 0.24} for i in range(8)]
+        sides = detector.goal_sides(wide + huddle)
+        self.assertTrue(all(s == 1.0 for s in sides[:12]))
+        self.assertTrue(all(s is None for s in sides[16:]))
+
+        # Em câmera aberta estável (sem close-ups), nenhum quadro é suprimido
+        only_wide = [{"t": i * 0.5, "cov_diff": 0.24, "end_score": 0.8, "p75_h": 0.21, "floor_cov": 0.50} for i in range(16)]
+        self.assertFalse(any(detector._detect_closeup_frames(only_wide)))
+
+    def test_painted_area_refinement_discards_midfield_fp_and_trims_midfield_tail(self):
+        # Quadra assimétrica (p90(|cov_diff|) > 0.16):
+        # - Lance 1 (0..10 s): 6 s no gol (cov=0.25) + 4 s de cauda no meio de quadra (cov=0.05) -> apara para 0..6 s
+        # - Falso positivo (14..20 s): 6 s só no meio de quadra (cov=0.05) -> descartado
+        samples = (
+            [{"t": i * 0.5, "cov_diff": 0.25, "end_score": 0.8} for i in range(12)]
+            + [{"t": (12 + i) * 0.5, "cov_diff": 0.05, "end_score": 0.8} for i in range(8)]
+            + [{"t": (20 + i) * 0.5, "cov_diff": 0.01, "end_score": 0.0} for i in range(8)]
+            + [{"t": (28 + i) * 0.5, "cov_diff": 0.05, "end_score": 0.8} for i in range(12)]
+        )
+        labels = [detector.ATAQUE] * 20 + [detector.INDEF] * 8 + [detector.ATAQUE] * 12
+        segs = detector.labels_to_segments(samples, labels, detector.ATAQUE)
+        self.assertEqual(segs, [{"start": 0.0, "end": 6.0}])
+
+    def test_closeup_bridge_merges_camera_cut_without_merging_across_opposite_play(self):
+        # Ataque 0..5 s + corte de Câmera 2 por 6 s (sem defesa) + ataque 11..16 s -> une em 0..16 s
+        samples = (
+            [{"t": i * 0.5, "p75_h": 0.20, "floor_cov": 0.52} for i in range(10)]
+            + [{"t": (10 + i) * 0.5, "p75_h": 0.36, "floor_cov": 0.45} for i in range(12)]
+            + [{"t": (22 + i) * 0.5, "p75_h": 0.20, "floor_cov": 0.52} for i in range(10)]
+        )
+        labels_cut = [detector.ATAQUE] * 10 + [detector.INDEF] * 12 + [detector.ATAQUE] * 10
+        self.assertEqual(detector.labels_to_segments(samples, labels_cut, detector.ATAQUE), [{"start": 0.0, "end": 16.0}])
+
+        # Com DEFESA no meio da lacuna, nunca une mesmo havendo corte de câmera
+        labels_opp = [detector.ATAQUE] * 10 + [detector.INDEF] * 5 + [detector.DEFESA] * 2 + [detector.INDEF] * 5 + [detector.ATAQUE] * 10
+        self.assertEqual(
+            detector.labels_to_segments(samples, labels_opp, detector.ATAQUE),
+            [{"start": 0.0, "end": 5.0}, {"start": 11.0, "end": 16.0}],
+        )
+
 
 class TeamColorSeparationTests(unittest.TestCase):
     def test_separates_same_luminance_yellow_vs_red_and_black_vs_blue_in_lab(self):
@@ -412,6 +455,23 @@ class DiagnosticsAndBorderTests(unittest.TestCase):
             self.assertTrue(any("aviso:" in txt for txt in log_texts))
         finally:
             app.jobs.pop(job_id, None)
+
+    def test_index_renders_clip_editor_and_marking_toggle_controls(self):
+        client = app.app.test_client()
+        resp = client.get("/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+        for element_id in (
+            'id="marking-toggle"',
+            'id="clip-editor-panel"',
+            'id="clip-editor-player"',
+            'id="clip-trim-bar"',
+            'id="clip-trim-handle-start"',
+            'id="clip-trim-handle-end"',
+            'id="clip-editor-cancel"',
+            'id="clip-editor-confirm"',
+        ):
+            self.assertIn(element_id, html)
 
 
 if __name__ == "__main__":

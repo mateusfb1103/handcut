@@ -88,14 +88,24 @@
         </section>
 
         <section id="editor" class="panel editor-panel hidden">
-          <div class="editor-main">
+          <div id="editor-main" class="editor-main">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">02 / MARCAÇÃO</p>
                 <h2>Revise e marque os lances</h2>
               </div>
               <span class="step-number">02</span>
+              <button
+                id="marking-toggle"
+                class="source-toggle marking-toggle"
+                type="button"
+                aria-label="Recolher marcação de lances"
+                aria-expanded="true"
+              >
+                <span aria-hidden="true">⌃</span>
+              </button>
             </div>
+            <div class="editor-main-body">
             <div class="video-meta">
               <div class="video-dot"></div>
               <div>
@@ -230,7 +240,74 @@
               </div>
               <div id="auto-status" class="status" aria-live="polite"></div>
             </div>
+            </div>
           </div>
+          <section
+            id="clip-editor-panel"
+            class="panel clip-editor-panel hidden"
+            aria-label="Edição de lance"
+          >
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">03 / EDIÇÃO DE LANCE</p>
+                <h2 id="clip-editor-title">Editar lance</h2>
+              </div>
+              <span class="step-number">03</span>
+            </div>
+            <div class="clip-editor-meta">
+              <span id="clip-editor-window-info" class="muted"></span>
+              <strong id="clip-editor-range-info"></strong>
+            </div>
+            <video id="clip-editor-player" preload="metadata"></video>
+            <div class="clip-editor-controls">
+              <button
+                id="clip-editor-play"
+                class="clip-play clip-editor-play-btn"
+                type="button"
+                aria-label="Reproduzir ou pausar"
+              >
+                ▶
+              </button>
+              <span id="clip-editor-win-start" class="clip-editor-time">0:00</span>
+              <div
+                id="clip-trim-bar"
+                class="clip-trim-bar"
+                role="group"
+                aria-label="Barra de ajuste do intervalo do lance"
+              >
+                <div class="clip-trim-track"></div>
+                <div id="clip-trim-range" class="clip-trim-range"></div>
+                <div id="clip-trim-playhead" class="clip-trim-playhead"></div>
+                <button
+                  id="clip-trim-handle-start"
+                  class="clip-trim-handle start"
+                  type="button"
+                  role="slider"
+                  aria-label="Ajustar início do lance"
+                ></button>
+                <button
+                  id="clip-trim-handle-end"
+                  class="clip-trim-handle end"
+                  type="button"
+                  role="slider"
+                  aria-label="Ajustar fim do lance"
+                ></button>
+              </div>
+              <span id="clip-editor-win-end" class="clip-editor-time">0:00</span>
+            </div>
+            <div class="clip-editor-readout">
+              <span id="clip-editor-current">Posição: 0:00</span>
+              <span class="muted">Arraste as extremidades verdes para estender ou encurtar o lance</span>
+            </div>
+            <div class="clip-editor-actions">
+              <button id="clip-editor-cancel" class="clip-action-btn cancel" type="button">
+                CANCELAR
+              </button>
+              <button id="clip-editor-confirm" class="clip-action-btn confirm" type="button">
+                CONFIRMAR
+              </button>
+            </div>
+          </section>
           <aside class="clips-sidebar" aria-label="Lances selecionados">
             <div class="clips-header">
               <div>

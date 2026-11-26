@@ -57,6 +57,15 @@ LABEL_SMOOTH_SECONDS = 1.0  # o estado de cada quadro é a maioria dos vizinhos 
 MIN_SEGMENT_SECONDS = 4.0   # lance sugerido mais curto que isso é descartado
 MERGE_GAP_SECONDS = 3.5     # breves quedas (< MIN_SEGMENT_SECONDS) dentro do mesmo lance são unidas
 
+# ---- Extensões opcionais para transmissões multicâmera / close-ups e meio de quadra ----
+CLOSEUP_MIN_HEIGHT = 0.44       # piso absoluto de altura p75 de pessoa para close-up extremo/tempo técnico
+CLOSEUP_HEIGHT_RATIO = 2.0      # razão relativa à escala base da câmera aberta do próprio jogo
+CLOSEUP_MIN_FLOOR_COV = 0.28    # abaixo disso quase não há piso de quadra visível (huddle/close/tela parada)
+CLOSEUP_BRIDGE_SECONDS = 9.0    # ponte máxima só quando há corte de câmera/close-up sem lance oposto no meio
+PAINTED_GOAL_P75_MIN = 0.135    # p75(|cov_diff|) mínimo para confirmar visita real à zona do gol (quadra assimétrica)
+MIDFIELD_TAIL_COV_MAX = 0.09    # |cov_diff| abaixo disso indica câmera retornando ao meio de quadra
+MIDFIELD_TAIL_MIN_SECONDS = 4.0 # cauda final contínua mínima de meio de quadra para aparar pós-lance/lesão
+
 ATAQUE, DEFESA, INDEF = "ataque", "defesa", "indef"
 
 
@@ -212,8 +221,8 @@ def _court_top_profile(mask: np.ndarray) -> np.ndarray:
     return np.array([float(np.percentile(padded[i:i + 2 * pad + 1], 25)) for i in range(sw)], dtype=np.float32)
 
 
-def _analyze_court(frame: np.ndarray, floor_history: deque[np.ndarray]) -> tuple[float, float | None, np.ndarray, np.ndarray]:
-    """Extrai `(cov_diff, end_score, floor_lab, top_y)` a partir da cor dominante do piso em LAB."""
+def _analyze_court_with_coverage(frame: np.ndarray, floor_history: deque[np.ndarray]) -> tuple[float, float | None, np.ndarray, np.ndarray, float]:
+    """Extrai `(cov_diff, end_score, floor_lab, top_y, floor_cov)` a partir da cor dominante do piso em LAB."""
     height, width = frame.shape[:2]
     small = cv2.resize(frame, (max(16, width // 4), max(16, height // 4)))
     sh, sw = small.shape[:2]
@@ -227,6 +236,7 @@ def _analyze_court(frame: np.ndarray, floor_history: deque[np.ndarray]) -> tuple
 
     dist = np.linalg.norm((lab - floor_lab) * np.array([0.4, 1.0, 1.0], dtype=np.float32), axis=2)
     mask = (dist < 24.0).astype(np.uint8)
+    floor_cov = float(mask.mean()) if mask.size else 0.0
     court_region = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
     top_y = _court_top_profile(mask)
 
@@ -255,7 +265,13 @@ def _analyze_court(frame: np.ndarray, floor_history: deque[np.ndarray]) -> tuple
                 score_e += length
     total_lines = score_d + score_e
     end_score = (score_d - score_e) / total_lines if total_lines > 0 else None
-    return cov_diff, end_score, floor_lab.astype(np.float32), top_y
+    return cov_diff, end_score, floor_lab.astype(np.float32), top_y, floor_cov
+
+
+def _analyze_court(frame: np.ndarray, floor_history: deque[np.ndarray]) -> tuple[float, float | None, np.ndarray, np.ndarray]:
+    """Extrai `(cov_diff, end_score, floor_lab, top_y)` a partir da cor dominante do piso em LAB."""
+    cov_diff, end_score, floor_lab, top_y, _ = _analyze_court_with_coverage(frame, floor_history)
+    return cov_diff, end_score, floor_lab, top_y
 
 
 def _court_side_features(frame: np.ndarray, floor_history: deque[np.ndarray]) -> tuple[float, float | None]:
@@ -276,13 +292,16 @@ def frame_features(frame: np.ndarray, detector: PersonDetector,
     """O que interessa de um quadro: jogadores na quadra (geometria + cor limpa do tronco) e lado do gol."""
     height, width = frame.shape[:2]
     history = floor_history if floor_history is not None else deque(maxlen=30)
-    cov_diff, end_score, floor_lab, top_y = _analyze_court(frame, history)
+    cov_diff, end_score, floor_lab, top_y, floor_cov = _analyze_court_with_coverage(frame, history)
     sw = len(top_y)
     people = []
+    raw_heights: list[float] = []
     for x1, y1, x2, y2, _ in detector.detect(frame):
         person_height = y2 - y1
         person_width = x2 - x1
         ph = person_height / height
+        if ph >= MIN_PERSON_HEIGHT:
+            raw_heights.append(float(ph))
         fy = y2 / height
         cx = (x1 + x2) / 2.0 / width
         ar = person_width / max(1.0, person_height)
@@ -333,6 +352,8 @@ def frame_features(frame: np.ndarray, detector: PersonDetector,
         "people": people,
         "cov_diff": round(cov_diff, 4),
         "end_score": None if end_score is None else round(end_score, 4),
+        "p75_h": round(float(np.percentile(raw_heights, 75)), 3) if raw_heights else 0.0,
+        "floor_cov": round(floor_cov, 3),
     }
 
 
@@ -375,6 +396,35 @@ def light_threshold(samples: list[dict]) -> float:
     return float(threshold)
 
 
+def _detect_closeup_frames(samples: list[dict]) -> list[bool]:
+    """Identifica quadros de close-up extremo/tempo técnico relativos à escala da câmera aberta do jogo.
+
+    Fica inativo quando as amostras não trazem `p75_h`/`floor_cov` ou em jogos de câmera aberta estável.
+    """
+    heights = [float(s["p75_h"]) for s in samples if s.get("p75_h") is not None and float(s["p75_h"]) > 0.0]
+    if len(heights) < 10:
+        return [False] * len(samples)
+    base_h = float(np.percentile(heights, 35))
+    height_limit = max(CLOSEUP_MIN_HEIGHT, base_h * CLOSEUP_HEIGHT_RATIO)
+    flags: list[bool] = []
+    for s in samples:
+        p75 = s.get("p75_h")
+        fcov = s.get("floor_cov")
+        is_tall = p75 is not None and float(p75) >= height_limit
+        is_low_floor = fcov is not None and float(fcov) < CLOSEUP_MIN_FLOOR_COV
+        flags.append(bool(is_tall or is_low_floor))
+    return flags
+
+
+def _has_painted_goal_area(samples: list[dict], closeups: list[bool] | None = None) -> bool:
+    """True quando a quadra apresenta assimetria forte de piso/parede junto ao gol (`p90(|cov_diff|) > 0.16`)."""
+    if not samples or "cov_diff" not in samples[0]:
+        return False
+    flags = closeups if closeups is not None else [False] * len(samples)
+    cov_vals = [abs(float(s["cov_diff"])) for s, cu in zip(samples, flags) if not cu]
+    return len(cov_vals) >= 6 and float(np.percentile(cov_vals, 90)) > 0.16
+
+
 def goal_sides(samples: list[dict], fps: float = SAMPLE_FPS) -> list[float | None]:
     """Para cada quadro, o lado do gol: 0.0 = esquerda da imagem, 1.0 = direita, None = não sei.
 
@@ -383,8 +433,8 @@ def goal_sides(samples: list[dict], fps: float = SAMPLE_FPS) -> list[float | Non
     """
     radius = max(1, round(SIDE_SMOOTH_SECONDS * fps))
     if samples and "cov_diff" in samples[0]:
-        cov_vals = [abs(float(s["cov_diff"])) for s in samples]
-        has_painted_area = len(cov_vals) >= 6 and float(np.percentile(cov_vals, 90)) > 0.16
+        closeups = _detect_closeup_frames(samples)
+        has_painted_area = _has_painted_goal_area(samples, closeups)
 
         # Alinha automaticamente o sinal de `cov_diff` pela correlação com `end_score`
         # (a inclinação em perspectiva das linhas de fundo é um invariante geométrico).
@@ -392,8 +442,9 @@ def goal_sides(samples: list[dict], fps: float = SAMPLE_FPS) -> list[float | Non
         if has_painted_area:
             pairs = [
                 (float(s["cov_diff"]), float(s["end_score"]))
-                for s in samples
-                if s.get("end_score") is not None
+                for s, cu in zip(samples, closeups)
+                if not cu
+                and s.get("end_score") is not None
                 and abs(float(s["end_score"])) >= 0.25
                 and abs(float(s["cov_diff"])) >= 0.08
             ]
@@ -403,7 +454,10 @@ def goal_sides(samples: list[dict], fps: float = SAMPLE_FPS) -> list[float | Non
                     cov_sign = -1.0
 
         raw: list[float | None] = []
-        for s in samples:
+        for s, cu in zip(samples, closeups):
+            if cu:
+                raw.append(None)
+                continue
             end_score = s.get("end_score")
             if has_painted_area:
                 raw.append(cov_sign * float(s["cov_diff"]) * 4.0 + (float(end_score) if end_score is not None else 0.0) * 0.5)
@@ -412,6 +466,9 @@ def goal_sides(samples: list[dict], fps: float = SAMPLE_FPS) -> list[float | Non
         dead_zone = 0.10 if has_painted_area else 0.05
         sides: list[float | None] = []
         for i in range(len(raw)):
+            if closeups[i]:
+                sides.append(None)
+                continue
             window = [x for x in raw[max(0, i - radius):i + radius + 1] if x is not None]
             if not window:
                 sides.append(None)
@@ -892,31 +949,95 @@ def diagnose_periods(period_samples: list[tuple[float, list[dict]]], proto: dict
     }
 
 
+def _detect_camera_cut_frames(samples: list[dict], closeups: list[bool]) -> list[bool]:
+    """Identifica cortes para câmera mais fechada (usado apenas para ponte de lacunas sem lance oposto)."""
+    heights = [float(s["p75_h"]) for s in samples if s.get("p75_h") is not None and float(s["p75_h"]) > 0.0]
+    if len(heights) < 10:
+        return list(closeups)
+    base_h = float(np.percentile(heights, 35))
+    cut_limit = max(0.27, base_h * 1.35)
+    return [
+        cu or (s.get("p75_h") is not None and float(s["p75_h"]) > cut_limit)
+        for s, cu in zip(samples, closeups)
+    ]
+
+
+def _bridge_segment_runs(runs: list[list], samples: list[dict], labels: list[str], wanted: str,
+                         closeups: list[bool], *, fps: float, merge_gap: float) -> list[list]:
+    """Une blocos do mesmo tipo dentro de `merge_gap` e faz ponte em cortes de câmera sem tipo oposto."""
+    opposite = DEFESA if wanted == ATAQUE else ATAQUE
+    cam_cuts = _detect_camera_cut_frames(samples, closeups)
+    has_cam_cuts = any(cam_cuts)
+    merged: list[list] = []
+    for a_i, b_i, active in runs:
+        t_a = samples[a_i]["t"]
+        t_b = samples[b_i]["t"] if b_i < len(samples) else samples[-1]["t"] + 1 / fps
+        if merged:
+            prev_a, prev_b, prev_ta, prev_tb, prev_act = merged[-1]
+            gap = t_a - prev_tb
+            if gap <= merge_gap:
+                merged[-1] = [prev_a, b_i, prev_ta, t_b, prev_act + active]
+                continue
+            if has_cam_cuts and gap <= CLOSEUP_BRIDGE_SECONDS:
+                gap_labels = labels[prev_b:a_i]
+                gap_cuts = cam_cuts[prev_b:a_i]
+                if not any(lb == opposite for lb in gap_labels) and gap_cuts and (sum(gap_cuts) / len(gap_cuts)) >= 0.40:
+                    merged[-1] = [prev_a, b_i, prev_ta, t_b, prev_act + active]
+                    continue
+        merged.append([a_i, b_i, t_a, t_b, active])
+    return merged
+
+
+def _refine_painted_segment(a_i: int, b_i: int, samples: list[dict], labels: list[str], wanted: str,
+                            closeups: list[bool], *, fps: float, min_seconds: float) -> tuple[int, int] | None:
+    """Confirma visita à zona do gol e apara cauda final sustentada de meio de quadra em quadras assimétricas."""
+    sub_cov = [abs(float(samples[k]["cov_diff"])) for k in range(a_i, b_i) if not closeups[k]]
+    if sub_cov and float(np.percentile(sub_cov, 75)) < PAINTED_GOAL_P75_MIN:
+        return None
+    tail_frames = max(1, round(MIDFIELD_TAIL_MIN_SECONDS * fps))
+    end_k = b_i
+    while end_k > a_i and abs(float(samples[end_k - 1]["cov_diff"])) < MIDFIELD_TAIL_COV_MAX:
+        end_k -= 1
+    if b_i - end_k >= tail_frames and end_k > a_i:
+        if sum(1 / fps for k in range(a_i, end_k) if labels[k] == wanted) >= min_seconds:
+            b_i = end_k
+    return a_i, b_i
+
+
 def labels_to_segments(samples: list[dict], labels: list[str], wanted: str, *, fps: float = SAMPLE_FPS,
                        duration: float | None = None, min_seconds: float = MIN_SEGMENT_SECONDS,
                        merge_gap: float = MERGE_GAP_SECONDS) -> list[dict]:
     """Junta os quadros seguidos com o estado `wanted` em intervalos {start, end} (em segundos)."""
-    segments: list[list[float]] = []
-    start = None
-    for sample, label in zip(samples, labels):
-        if label == wanted and start is None:
-            start = sample["t"]
-        elif label != wanted and start is not None:
-            segments.append([start, sample["t"], sample["t"] - start])
-            start = None
-    if start is not None and samples:
+    runs: list[list] = []
+    start_idx = None
+    for idx, label in enumerate(labels):
+        if label == wanted and start_idx is None:
+            start_idx = idx
+        elif label != wanted and start_idx is not None:
+            runs.append([start_idx, idx, samples[idx]["t"] - samples[start_idx]["t"]])
+            start_idx = None
+    if start_idx is not None and samples:
         end_t = samples[-1]["t"] + 1 / fps
-        segments.append([start, end_t, end_t - start])
-    merged: list[list[float]] = []
-    for a, b, active in segments:
-        if merged and a - merged[-1][1] <= merge_gap:
-            merged[-1][1] = b
-            merged[-1][2] += active
-        else:
-            merged.append([a, b, active])
+        runs.append([start_idx, len(samples), end_t - samples[start_idx]["t"]])
+
+    closeups = _detect_closeup_frames(samples)
+    painted = _has_painted_goal_area(samples, closeups)
+    merged = _bridge_segment_runs(runs, samples, labels, wanted, closeups, fps=fps, merge_gap=merge_gap)
+
     limit = duration if duration else float("inf")
-    return [{"start": round(a, 2), "end": round(min(b, limit), 2)}
-            for a, b, active in merged if active >= min_seconds]
+    result: list[dict] = []
+    for a_i, b_i, t_a, t_b, active in merged:
+        if active < min_seconds:
+            continue
+        if painted:
+            refined = _refine_painted_segment(a_i, b_i, samples, labels, wanted, closeups, fps=fps, min_seconds=min_seconds)
+            if refined is None:
+                continue
+            a_i, b_i = refined
+            t_a = samples[a_i]["t"]
+            t_b = samples[b_i]["t"] if b_i < len(samples) else samples[-1]["t"] + 1 / fps
+        result.append({"start": round(t_a, 2), "end": round(min(t_b, limit), 2)})
+    return result
 
 
 def suggest(samples: list[dict], mine_is_light: bool | None = None, *, fps: float = SAMPLE_FPS,

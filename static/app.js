@@ -1,6 +1,10 @@
 const $ = (selector) => document.querySelector(selector);
 const player = $("#player");
+const clipEditorPlayer = $("#clip-editor-player");
+const CLIP_EDIT_PAD_SECONDS = 30;
+const CLIP_MIN_DURATION_SECONDS = 0.5;
 let mediaId = null;
+let mediaDuration = 0;
 let clips = [];
 let pendingStart = null;
 let pendingMarkTarget = null;
@@ -10,6 +14,12 @@ let busy = false;
 let autoResult = null; // última análise automática: { mediaId, shirtKey, periodsKey, suggestions }
 let pickingShirt = false;
 let pickedShirtColors = []; // [[r, g, b], ...] clicadas na camisa de jogadores do meu time
+let editingClip = null;
+let editWinStart = 0;
+let editWinEnd = 0;
+let editDraftStart = 0;
+let editDraftEnd = 0;
+let activeTrimDrag = null;
 
 function formatTime(seconds) {
   const value = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -72,8 +82,32 @@ $("#source-panel").addEventListener("click", (event) => {
   setSourceCollapsed(false);
 });
 
+function setMarkingCollapsed(collapsed) {
+  const main = $("#editor-main");
+  if (!main) return;
+  main.classList.toggle("collapsed", collapsed);
+  $("#marking-toggle").setAttribute("aria-expanded", String(!collapsed));
+  $("#marking-toggle").setAttribute(
+    "aria-label",
+    collapsed ? "Abrir marcação de lances" : "Recolher marcação de lances",
+  );
+}
+
+$("#marking-toggle").addEventListener("click", (event) => {
+  event.stopPropagation();
+  setMarkingCollapsed(!$("#editor-main").classList.contains("collapsed"));
+  event.currentTarget.blur();
+});
+
+$("#editor-main").addEventListener("click", (event) => {
+  if (!$("#editor-main").classList.contains("collapsed")) return;
+  if (event.target.closest("#marking-toggle")) return;
+  setMarkingCollapsed(false);
+});
+
 function enterEditor(data) {
   mediaId = data.media_id;
+  mediaDuration = Number(data.duration) || 0;
   clips = [];
   pendingStart = null;
   pendingMarkTarget = null;
@@ -84,6 +118,11 @@ function enterEditor(data) {
   setPickingShirt(false);
   renderShirtPicks();
   setStatus($("#auto-status"), "", "");
+  clipEditorPlayer.pause();
+  clipEditorPlayer.removeAttribute("src");
+  clipEditorPlayer.removeAttribute("data-media-id");
+  clipEditorPlayer.load();
+  closeClipEditor();
   $("#editor").classList.remove("hidden");
   $(".shell").classList.add("editor-layout");
   setSourceCollapsed(true);
@@ -337,6 +376,172 @@ function analysisPeriodsKey(periods = analysisPeriods) {
     .join("|");
 }
 
+function computeClipEditWindow(
+  allClips,
+  targetClip,
+  totalDuration,
+  padSeconds = CLIP_EDIT_PAD_SECONDS,
+) {
+  const maxDur = Math.max(Number(totalDuration) || 0, targetClip.end);
+  let winStart = Math.max(0, targetClip.start - padSeconds);
+  let winEnd = Math.min(maxDur, targetClip.end + padSeconds);
+
+  for (const other of allClips) {
+    if (other === targetClip) continue;
+    if (other.end <= targetClip.start && other.end >= winStart) {
+      winStart = Math.max(winStart, Math.min(targetClip.start, other.end + 1));
+    } else if (other.start >= targetClip.end && other.start <= winEnd) {
+      winEnd = Math.min(winEnd, Math.max(targetClip.end, other.start - 1));
+    } else {
+      if (other.start < targetClip.start && other.end > targetClip.start) {
+        winStart = Math.max(winStart, targetClip.start);
+      }
+      if (other.start < targetClip.end && other.end > targetClip.end) {
+        winEnd = Math.min(winEnd, targetClip.end);
+      }
+    }
+  }
+
+  winStart = Math.min(winStart, targetClip.start);
+  winEnd = Math.max(winEnd, targetClip.end);
+  return { winStart, winEnd };
+}
+
+function createSvgIcon(pathD) {
+  const svgNs = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNs, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(svgNs, "path");
+  path.setAttribute("d", pathD);
+  svg.append(path);
+  return svg;
+}
+
+function createPencilIcon() {
+  return createSvgIcon(
+    "M11.8 2.2a1.4 1.4 0 0 1 2 2L5.3 12.7l-3 .8.8-3z",
+  );
+}
+
+function createCloseIcon() {
+  return createSvgIcon("M4 4l8 8M12 4l-8 8");
+}
+
+function renderClipTrimUI() {
+  if (!editingClip) return;
+  const span = Math.max(0.01, editWinEnd - editWinStart);
+  const startPct = ((editDraftStart - editWinStart) / span) * 100;
+  const endPct = ((editDraftEnd - editWinStart) / span) * 100;
+  const curRaw = Number.isFinite(clipEditorPlayer.currentTime)
+    ? clipEditorPlayer.currentTime
+    : editDraftStart;
+  const cur = Math.min(editWinEnd, Math.max(editWinStart, curRaw));
+  const curPct = ((cur - editWinStart) / span) * 100;
+
+  $("#clip-trim-range").style.left = `${startPct}%`;
+  $("#clip-trim-range").style.width = `${Math.max(0, endPct - startPct)}%`;
+  $("#clip-trim-handle-start").style.left = `${startPct}%`;
+  $("#clip-trim-handle-end").style.left = `${endPct}%`;
+  $("#clip-trim-handle-start").setAttribute(
+    "aria-valuenow",
+    String(Math.round(editDraftStart)),
+  );
+  $("#clip-trim-handle-end").setAttribute(
+    "aria-valuenow",
+    String(Math.round(editDraftEnd)),
+  );
+  $("#clip-trim-playhead").style.left = `${curPct}%`;
+
+  $("#clip-editor-win-start").textContent = formatTime(editWinStart);
+  $("#clip-editor-win-end").textContent = formatTime(editWinEnd);
+  $("#clip-editor-window-info").textContent =
+    `Janela do editor: ${formatTime(editWinStart)} — ${formatTime(editWinEnd)}`;
+  $("#clip-editor-range-info").textContent =
+    `Lance: ${formatTime(editDraftStart)} — ${formatTime(editDraftEnd)} · ${formatTime(editDraftEnd - editDraftStart)}`;
+  $("#clip-editor-current").textContent = `Posição: ${formatTime(cur)}`;
+  $("#clip-editor-play").textContent = clipEditorPlayer.paused ? "▶" : "⏸";
+}
+
+function seekClipEditor(targetTime) {
+  const clamped = Math.min(editWinEnd, Math.max(editWinStart, targetTime));
+  if (clipEditorPlayer.readyState >= 1) {
+    clipEditorPlayer.currentTime = clamped;
+  } else {
+    clipEditorPlayer.addEventListener(
+      "loadedmetadata",
+      () => {
+        if (editingClip) clipEditorPlayer.currentTime = clamped;
+      },
+      { once: true },
+    );
+  }
+}
+
+function openClipEditor(clip) {
+  if (!mediaId) return;
+  if (!player.paused) player.pause();
+  setPickingShirt(false);
+  editingClip = clip;
+  const knownDuration =
+    mediaDuration ||
+    (Number.isFinite(player.duration) ? player.duration : clip.end + 30);
+  const { winStart, winEnd } = computeClipEditWindow(
+    clips,
+    clip,
+    knownDuration,
+  );
+  editWinStart = winStart;
+  editWinEnd = winEnd;
+  editDraftStart = clip.start;
+  editDraftEnd = clip.end;
+
+  setMarkingCollapsed(true);
+  $("#clip-editor-panel").classList.remove("hidden");
+  const idx = clips.indexOf(clip);
+  $("#clip-editor-title").textContent =
+    `Editar Lance ${String(idx + 1).padStart(2, "0")}`;
+
+  if (clipEditorPlayer.dataset.mediaId !== String(mediaId)) {
+    clipEditorPlayer.dataset.mediaId = String(mediaId);
+    clipEditorPlayer.src = `/api/media/${mediaId}`;
+  }
+  clipEditorPlayer.pause();
+  seekClipEditor(editDraftStart);
+  renderClips();
+  renderClipTrimUI();
+  $("#clip-editor-panel").scrollIntoView({
+    behavior: "smooth",
+    block: "nearest",
+  });
+}
+
+function closeClipEditor() {
+  if (clipEditorPlayer && !clipEditorPlayer.paused) clipEditorPlayer.pause();
+  editingClip = null;
+  activeTrimDrag = null;
+  $("#clip-trim-handle-start")?.classList.remove("dragging");
+  $("#clip-trim-handle-end")?.classList.remove("dragging");
+  $("#clip-editor-panel")?.classList.add("hidden");
+  setMarkingCollapsed(false);
+  renderClips();
+}
+
+function toggleClipEditorPlay() {
+  if (!editingClip) return;
+  if (clipEditorPlayer.paused) {
+    if (
+      clipEditorPlayer.currentTime < editWinStart ||
+      clipEditorPlayer.currentTime >= editWinEnd - 0.15
+    ) {
+      clipEditorPlayer.currentTime = editDraftStart;
+    }
+    clipEditorPlayer.play().catch(() => {});
+  } else {
+    clipEditorPlayer.pause();
+  }
+}
+
 function renderClips() {
   const list = $("#clips-list");
   list.replaceChildren();
@@ -344,12 +549,19 @@ function renderClips() {
   $("#empty-clips").classList.toggle("hidden", clips.length > 0);
   clips.forEach((clip, index) => {
     const item = document.createElement("li");
-    item.className = "clip-item";
+    item.className = clip === editingClip ? "clip-item editing" : "clip-item";
     const play = document.createElement("button");
     play.className = "clip-play";
     play.textContent = "▶";
     play.title = "Reproduzir este intervalo";
     play.addEventListener("click", () => {
+      if (clip === editingClip) {
+        seekClipEditor(editDraftStart);
+        clipEditorPlayer.play().catch(() => {});
+        return;
+      }
+      if (!clipEditorPlayer.paused) clipEditorPlayer.pause();
+      setMarkingCollapsed(false);
       player.currentTime = clip.start;
       player.play();
     });
@@ -363,18 +575,182 @@ function renderClips() {
     const time = document.createElement("span");
     time.className = "clip-time";
     time.textContent = `${formatTime(clip.start)} — ${formatTime(clip.end)} · ${formatTime(clip.end - clip.start)}`;
+
+    const actions = document.createElement("div");
+    actions.className = "clip-actions";
+
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "clip-icon-btn clip-edit";
+    edit.title = "Editar início e fim deste lance";
+    edit.setAttribute("aria-label", `Editar Lance ${String(index + 1).padStart(2, "0")}`);
+    edit.append(createPencilIcon());
+    edit.addEventListener("click", () => {
+      openClipEditor(clip);
+    });
+
     const remove = document.createElement("button");
-    remove.className = "clip-remove";
-    remove.textContent = "Remover";
+    remove.type = "button";
+    remove.className = "clip-icon-btn clip-delete";
+    remove.title = "Remover este lance";
+    remove.setAttribute("aria-label", `Remover Lance ${String(index + 1).padStart(2, "0")}`);
+    remove.append(createCloseIcon());
     remove.addEventListener("click", () => {
-      clips.splice(index, 1);
+      const removed = clips.splice(index, 1)[0];
+      if (removed === editingClip) {
+        closeClipEditor();
+        return;
+      }
+      if (editingClip) {
+        const knownDuration =
+          mediaDuration ||
+          (Number.isFinite(player.duration) ? player.duration : editingClip.end + 30);
+        const win = computeClipEditWindow(clips, editingClip, knownDuration);
+        editWinStart = win.winStart;
+        editWinEnd = win.winEnd;
+        editDraftStart = Math.max(editWinStart, editDraftStart);
+        editDraftEnd = Math.min(editWinEnd, editDraftEnd);
+        renderClipTrimUI();
+      }
       renderClips();
     });
-    item.append(play, label, tag, time, remove);
+
+    actions.append(edit, remove);
+    item.append(play, label, tag, time, actions);
     list.append(item);
   });
   $("#export-button").disabled = clips.length === 0 || busy;
 }
+
+clipEditorPlayer.addEventListener("click", toggleClipEditorPlay);
+$("#clip-editor-play").addEventListener("click", (event) => {
+  toggleClipEditorPlay();
+  event.currentTarget.blur();
+});
+clipEditorPlayer.addEventListener("play", renderClipTrimUI);
+clipEditorPlayer.addEventListener("pause", renderClipTrimUI);
+clipEditorPlayer.addEventListener("timeupdate", () => {
+  if (!editingClip) return;
+  if (clipEditorPlayer.currentTime < editWinStart) {
+    clipEditorPlayer.currentTime = editWinStart;
+  } else if (clipEditorPlayer.currentTime >= editWinEnd) {
+    clipEditorPlayer.pause();
+    clipEditorPlayer.currentTime = editWinEnd;
+  }
+  renderClipTrimUI();
+});
+
+function timeFromTrimPointer(clientX) {
+  const rect = $("#clip-trim-bar").getBoundingClientRect();
+  const frac = Math.min(
+    1,
+    Math.max(0, (clientX - rect.left) / Math.max(1, rect.width)),
+  );
+  return editWinStart + frac * (editWinEnd - editWinStart);
+}
+
+function applyTrimDrag(clientX) {
+  if (!editingClip || !activeTrimDrag) return;
+  const target = timeFromTrimPointer(clientX);
+  if (activeTrimDrag === "start") {
+    editDraftStart = Math.min(
+      target,
+      editDraftEnd - CLIP_MIN_DURATION_SECONDS,
+    );
+    editDraftStart = Math.max(editWinStart, editDraftStart);
+    clipEditorPlayer.currentTime = editDraftStart;
+  } else if (activeTrimDrag === "end") {
+    editDraftEnd = Math.max(
+      target,
+      editDraftStart + CLIP_MIN_DURATION_SECONDS,
+    );
+    editDraftEnd = Math.min(editWinEnd, editDraftEnd);
+    clipEditorPlayer.currentTime = editDraftEnd;
+  } else {
+    clipEditorPlayer.currentTime = target;
+  }
+  renderClipTrimUI();
+}
+
+$("#clip-trim-handle-start").addEventListener("pointerdown", (event) => {
+  if (!editingClip) return;
+  event.preventDefault();
+  event.stopPropagation();
+  activeTrimDrag = "start";
+  clipEditorPlayer.pause();
+  event.currentTarget.classList.add("dragging");
+  $("#clip-trim-bar").setPointerCapture(event.pointerId);
+});
+
+$("#clip-trim-handle-end").addEventListener("pointerdown", (event) => {
+  if (!editingClip) return;
+  event.preventDefault();
+  event.stopPropagation();
+  activeTrimDrag = "end";
+  clipEditorPlayer.pause();
+  event.currentTarget.classList.add("dragging");
+  $("#clip-trim-bar").setPointerCapture(event.pointerId);
+});
+
+$("#clip-trim-bar").addEventListener("pointerdown", (event) => {
+  if (!editingClip || event.target.closest(".clip-trim-handle")) return;
+  event.preventDefault();
+  activeTrimDrag = "seek";
+  $("#clip-trim-bar").setPointerCapture(event.pointerId);
+  applyTrimDrag(event.clientX);
+});
+
+$("#clip-trim-bar").addEventListener("pointermove", (event) => {
+  if (!activeTrimDrag) return;
+  applyTrimDrag(event.clientX);
+});
+
+function stopTrimDrag() {
+  if (!activeTrimDrag) return;
+  activeTrimDrag = null;
+  $("#clip-trim-handle-start").classList.remove("dragging");
+  $("#clip-trim-handle-end").classList.remove("dragging");
+}
+$("#clip-trim-bar").addEventListener("pointerup", stopTrimDrag);
+$("#clip-trim-bar").addEventListener("pointercancel", stopTrimDrag);
+
+function nudgeTrimHandle(edge, event) {
+  if (!editingClip || (event.key !== "ArrowLeft" && event.key !== "ArrowRight"))
+    return;
+  event.preventDefault();
+  event.stopPropagation();
+  const step = (event.shiftKey ? 0.5 : 1.0) * (event.key === "ArrowRight" ? 1 : -1);
+  clipEditorPlayer.pause();
+  if (edge === "start") {
+    editDraftStart = Math.max(
+      editWinStart,
+      Math.min(editDraftEnd - CLIP_MIN_DURATION_SECONDS, editDraftStart + step),
+    );
+    clipEditorPlayer.currentTime = editDraftStart;
+  } else {
+    editDraftEnd = Math.min(
+      editWinEnd,
+      Math.max(editDraftStart + CLIP_MIN_DURATION_SECONDS, editDraftEnd + step),
+    );
+    clipEditorPlayer.currentTime = editDraftEnd;
+  }
+  renderClipTrimUI();
+}
+$("#clip-trim-handle-start").addEventListener("keydown", (e) =>
+  nudgeTrimHandle("start", e),
+);
+$("#clip-trim-handle-end").addEventListener("keydown", (e) =>
+  nudgeTrimHandle("end", e),
+);
+
+$("#clip-editor-cancel").addEventListener("click", closeClipEditor);
+$("#clip-editor-confirm").addEventListener("click", () => {
+  if (!editingClip) return;
+  editingClip.start = Number(editDraftStart.toFixed(2));
+  editingClip.end = Number(editDraftEnd.toFixed(2));
+  clips.sort((a, b) => a.start - b.start);
+  closeClipEditor();
+});
 
 // Depois de um clique nos controles nativos do player, o teclado passa a valer só para eles
 // (as setas pulam outro valor e I, O e espaço deixam de funcionar). Tirar o foco do player
@@ -404,7 +780,44 @@ function isShortcutInput(target) {
 }
 
 function handlePlayerShortcut(event) {
-  if (!mediaId || isShortcutInput(event.target)) return;
+  if (!mediaId) return;
+  if (editingClip) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.type === "keydown") closeClipEditor();
+      return;
+    }
+    if (event.target instanceof Element && event.target.closest(".clip-trim-handle"))
+      return;
+    if (isShortcutInput(event.target)) return;
+    const isNav =
+      event.code === "Space" ||
+      event.key === "ArrowLeft" ||
+      event.key === "ArrowRight";
+    if (!isNav) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    if (event.type === "keyup" || event.repeat) return;
+    if (event.code === "Space") {
+      toggleClipEditorPlay();
+    } else if (event.key === "ArrowLeft") {
+      clipEditorPlayer.currentTime = Math.max(
+        editWinStart,
+        clipEditorPlayer.currentTime - 5,
+      );
+      renderClipTrimUI();
+    } else if (event.key === "ArrowRight") {
+      clipEditorPlayer.currentTime = Math.min(
+        editWinEnd,
+        clipEditorPlayer.currentTime + 5,
+      );
+      renderClipTrimUI();
+    }
+    return;
+  }
+  if (isShortcutInput(event.target)) return;
   const isPlayerShortcut =
     event.code === "Space" ||
     event.key === "ArrowLeft" ||
@@ -769,8 +1182,14 @@ $("#change-video").addEventListener("click", () => {
   player.pause();
   player.removeAttribute("src");
   player.load();
+  clipEditorPlayer.pause();
+  clipEditorPlayer.removeAttribute("src");
+  clipEditorPlayer.removeAttribute("data-media-id");
+  clipEditorPlayer.load();
   mediaId = null;
+  mediaDuration = 0;
   clips = [];
+  closeClipEditor();
   resetPendingMark();
   markingMode = "clip";
   analysisPeriods = [];
