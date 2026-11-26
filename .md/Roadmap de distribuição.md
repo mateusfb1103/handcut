@@ -65,11 +65,11 @@ Marque cada ação ao concluir; a etapa seguinte começa quando o critério da a
 - [ ] Definir como o app avisa que há uma versão nova.
 - [ ] Revisar os termos de uso do download de vídeos e fechar a decisão "Uso dos vídeos baixados".
 
-### E · Depois, sem prazo (protótipo da Fase 2 na branch `fase2-yolo`)
+### E · Depois, sem prazo (Fase 2 — sugestão automática com `YOLOX-s` `Apache-2.0`)
 
-> **Bloqueio de pacote:** não rodar `build.py` nem enviar ZIP a testadores enquanto o modelo `AGPL-3.0` (`models/yolo11n.onnx`) estiver no pacote sem licença comercial ou substituição por modelo permissivo.
+> **Status de licença (resolvido em 26/11/2026):** `models/yolo11n.onnx` (`AGPL-3.0`) foi substituído por `models/yolox_s.onnx` (`Apache-2.0`, acompanhado de `models/LICENSE-YOLOX.txt` e `models/NOTICE`) e removido completamente do histórico Git (`3B.5`). `build.py` já empacota o modelo permissivo e os arquivos de atribuição obrigatórios.
 
-- [ ] Concluir o protocolo da Fase 2 em [Protocolo de Testes Fase 2.md](./Protocolo%20de%20Testes%20Fase%202.md) (480p primeiro, comparando com 720p apenas se 480p não atingir as metas).
-- [ ] Decidir licença e modelo antes de congelar o teste cego e gerar ZIP.
-- [ ] Implementar salvamento de marcações (Fase 1) e concluir a Etapa C antes de mesclar a Fase 2 na `main`.
+- [ ] Concluir o protocolo da Fase 2 em [Protocolo de Testes Fase 2.md](./Protocolo%20de%20Testes%20Fase%202.md) (pendente apenas o Plano B `1A-v2` para quadras bicolores com rede, como `Londrina x Pato.mp4`).
+- [x] Decidir licença e modelo (`YOLOX-s` `Apache-2.0` congelado no Passo 3A/3B e histórico Git higienizado no Passo 3B.5).
+- [ ] Implementar salvamento de marcações (Fase 1) e concluir a Etapa C para fechar o ciclo de testes com usuários.
 - [ ] Fazer a versão para Mac (empacotamento, assinatura e notarização da Apple).

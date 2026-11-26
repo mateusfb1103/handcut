@@ -51,16 +51,16 @@ Os intervalos são exportados na ordem do jogo. A margem padrão adiciona 3 segu
 - Na barra exclusiva do player (branca com o intervalo do lance destacado em verde), arraste as **extremidades verdes** para estender ou encurtar início e fim com pré-visualização imediata do quadro, e clique em **CONFIRMAR** (salva o novo intervalo) ou **CANCELAR** (descarta). Em ambos os casos, o editor de lance fecha e a seção **02 / MARCAÇÃO** volta ao normal — evitando precisar aumentar a margem de corte global para todos os lances.
 - Atalhos durante a edição de lance: `Espaço` (reproduzir ou pausar dentro da janela), `←` / `→` (voltar ou avançar 5 s na janela, ou ±1 s / ±0,5 s com `Shift` quando uma extremidade verde estiver focada) e `Esc` (cancelar).
 
-## Sugestão automática de lances (Fase 2 — protótipo experimental na branch `fase2-yolo`)
+## Sugestão automática de lances (Fase 2)
 
-> **Aviso:** nesta branch, a Fase 2 é um protótipo local em validação (não empacotar para distribuição nem mesclar à `main` antes de concluir a prova de viabilidade, a definição de licença do modelo, o salvamento de marcações e a Etapa C).
+> **Estado atual:** modelo `YOLOX-s` (`Apache-2.0`) congelado e histórico Git higienizado (`3A/3B/3B.5` concluídas). A detecção está aprovada nos jogos de quadra padrão (`Londrina-X-Cascavel`, `Final4` e `Pato x Cascavel`) e segue em ajuste fino apenas para quadras bicolores com rede na frente da câmera (`Londrina x Pato`, Plano B `1A-v2`).
 
 Com um vídeo aberto, o bloco "Sugestão automática" analisa o jogo e adiciona à lista os trechos de ataque ou de defesa do seu time (marcados como "sugerido"). Você revisa, ajusta início e fim de lances pontuais no ícone de lápis ou remove o que estiver errado no `X`, e exporta como de costume.
 
-- Escolha se o seu time veste camisa **clara** ou **escura** e se quer **ataques** ou **defesas**.
+- Escolha a cor da camisa do seu time (clara, escura, cor específica ou clicando diretamente na camisa no vídeo) e se quer **ataques** ou **defesas**.
 - Para vídeos com mais de um jogo, clique em **Marcar períodos de análise**. Os botões/atalhos `I` e `O` passam a delimitar um período; repita para adicionar quantos períodos precisar. **Recomendação:** deixe cerca de **5 segundos de folga** antes e depois de cada trecho relevante para que a suavização nas bordas não descarte lances próximos ao início ou ao fim do período. Só esses trechos seguem para o YOLO. Clique novamente no botão para voltar a marcar lances manualmente. Sem períodos delimitados, a análise continua cobrindo o vídeo inteiro.
 - Um modelo YOLOX-s (`models/yolox_s.onnx`, licença `Apache-2.0`, ver `models/LICENSE-YOLOX.txt` e `models/NOTICE`) acha os jogadores, a cor da camisa separa os times e o time mais perto do gol é o que defende. O código está em `detector.py`.
-- Roda só na CPU (usando todos os núcleos disponíveis menos um, para não travar a interface). Em testes na máquina de referência (i5-8250U), analisar levou cerca de `0,46x–0,47x` da duração selecionada em 480p; o desempenho varia conforme o computador.
+- Roda só na CPU (usando todos os núcleos disponíveis menos um, para não travar a interface). Em testes na máquina de referência (i5-8250U), analisar levou cerca de `0,43x` da duração selecionada em 480p; o desempenho varia conforme o computador.
 - Para medir o quanto acerta em outro jogo, anote os lances reais e rode `python tools/avaliar_deteccao.py VIDEO.mp4 GABARITO.txt --camisa clara` (o formato do gabarito está no começo do script e em `.md/Protocolo de Testes Fase 2.md`).
 
 ## Observações

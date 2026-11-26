@@ -43,7 +43,7 @@ Vídeos originais fornecidos em `C:\Users\mateu\Videos\Vídeos Teste` e gabarito
 ### Pendências restantes no acervo (0A)
 
 - [x] **Micro-gabarito por sinal (~30 quadros/vídeo nos 2 vídeos de ajuste):** concluído e revisado em `tools/gabaritos/micro_londrina_x_cascavel.json` (30 quadros) e `tools/gabaritos/micro_londrina_x_cascavel_final4.json` (31 quadros) com referência em Londrina (`meu`).
-- [ ] **Teste N3 (2º tempo isolado vs vídeo inteiro):** par com 1 jogo contínuo completo (1º + 2º tempo) e gabarito em trecho do 2º tempo, para validar o deslocamento de tempo absoluto em recortes FFmpeg.
+- [x] **Teste N3 (2º tempo isolado vs vídeo inteiro):** validado em 19/11/2026 com **13/13 (100%)** sugestões alinhadas (diferença máxima interna `0,5 s`, ver tabela abaixo).
 - [ ] **Trecho exploratório de arquibancada (opcional, fora da meta):** 1 trecho curto gravado com câmera na mão apenas para observação qualitativa.
 
 ---
@@ -76,4 +76,4 @@ Preencher uma linha para cada execução oficial (gerada por `tools/avaliar_dete
 | `Londrina x Pato.mp4` (`30/1` CFR) | `151.0 s – 321.3 s` | 58.3 s (`0.34×`) | 8/8 (100%) | 0.5 s | **PASSA** |
 | **Total N3** | — | — | **13/13 (100%)** | **0.5 s** | **PASSA** |
 
-> **Diagnóstico da reprovação em `Londrina x Pato.mp4` (2B):** a separação de camisas de brilho próximo (**preto × azul**) funcionou (`meu=[23.0, 128.0, 128.0]` vs `adv=[66.0, 139.0, 99.0]`) e o vídeo original já é `852×480` (portanto não há ganho em testar 720p). A falha veio do sinal de lado do gol (`1A`) em quadra bicolor (azul + grande retângulo cinza de vôlei no centro + rede na câmera), onde `floor_lab` deriva entre azul e cinza no meio do jogo e as bordas do retângulo de vôlei geram linhas diagonais falsas no `HoughLinesP`. Pelo critério de parada do passo 2B, **não avançar para a Fase 5** antes de resolver essa classe de quadra no Plano B da Fase 1 (ou fechar 3A/3B em paralelo).
+> **Diagnóstico da reprovação em `Londrina x Pato.mp4` (2B):** a separação de camisas de brilho próximo (**preto × azul**) funcionou (`meu=[23.0, 128.0, 128.0]` vs `adv=[66.0, 139.0, 99.0]`) e o vídeo original já é `852×480` (portanto não há ganho em testar 720p). A falha veio do sinal de lado do gol (`1A`) em quadra bicolor (azul + grande retângulo cinza de vôlei no centro + rede na câmera), onde `floor_lab` deriva entre azul e cinza no meio do jogo e as bordas do retângulo de vôlei geram linhas diagonais falsas no `HoughLinesP`. Com a substituição de licença `3A/3B/3B.5` já concluída (`yolox_s.onnx` `Apache-2.0`), o próximo passo para fechar a validação da Fase 2 é resolver essa classe de quadra no **Plano B (`1A-v2`)**.

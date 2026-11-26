@@ -53,10 +53,10 @@ A licença dos pesos deve ser conferida diretamente na origem oficial, nunca em 
   - Recuperação de jogadores vs `yolo11n.onnx` nos 61 quadros de referência: **93,6% (496/530)** (meta ≥ `90%`);
   - Velocidade real em CPU (i5-8250U, 480p, sem cache): **`0,43×`** nos 2 vídeos de ajuste (meta ≤ `0,50×`);
   - Conjunto de Ajuste (`2A`): **100% PASSA** (`Recall 100%`, `Err./Corr. 0,00`, `0 partidos`, `Rev. est. ≤ 12,8 min`).
-- **`models/yolo11n.onnx` removido** do working tree (pendente apenas a etapa `3B.5` de higienização do histórico Git antes de distribuição/merge).
+- **`models/yolo11n.onnx` removido** do working tree e **expurgado do histórico Git** na etapa **`3B.5` (concluída em 26/11/2026)**: branch `fase2-yolo` reconstruída diretamente sobre `master` (`bdc409a`), sincronizada em `handcut/fase2-yolo` e limpa localmente (`reflog expire` + `gc --prune=now`), com `0` ocorrências de `yolo11n.onnx` no repositório.
 
 ## Próximos passos
 
 1. Enviar o formulário de licença da Ultralytics em paralelo (opcional, apenas referência de preço).
-2. *(3B.5, antes de distribuir/mesclar)* Criar branch limpa a partir da `master` sem o binário `yolo11n.onnx` no histórico e remover a branch antiga `fase2-yolo` do remoto.
+2. ~~*(3B.5, antes de distribuir/mesclar)* Criar branch limpa a partir da `master` sem o binário `yolo11n.onnx` no histórico e remover a branch antiga `fase2-yolo` do remoto.~~ **Concluído em 26/11/2026 (`bdc409a`).**
 3. Avançar sobre o modelo congelado `yolox_s.onnx` para o **Plano B `1A-v2`** (quadras bicolores com rede) e re-validação final `2B` + `3C`.
