@@ -1,0 +1,20 @@
+# Conjunto de Teste Cego 2 — Pato x Cascavel.mp4 (6:02, 852x480, 30 fps)
+# Quadra: madeira sem área verde, com banco visível na parte inferior | Placar na tela: sim
+# Time de referência: Pato (camisa preta) | Adversário (--inverter): Cascavel (camisa amarela)
+# Emenda identificada pela troca do relógio e placar (03:47, 0-1 -> 00:18, 10-12) em 3:49.5; ±5 s são excluídos.
+
+emenda 3:49.5
+
+ataque 0:30 0:46
+defesa 0:50 1:18
+ataque 1:24 1:55
+ataque 2:25 2:47
+defesa 2:51 3:04
+defesa 3:30 3:47
+defesa 3:50 4:04
+defesa 4:11 4:19
+ataque 4:42 4:59
+ataque 5:06 5:16
+ataque 5:22 5:28
+ataque 5:37 5:44
+defesa 5:50 5:57

@@ -1,0 +1,155 @@
+# Gabarito oficial — Maringá x Cascavel JAPS (jogo completo 1:56 - 1:19:56)
+# Referência: Maringá (camisa verde = ataque; Cascavel camisa amarela = defesa)
+# Convertido de "Gabarito - Maringá x Cascavel JAPS.txt" (tempos no vídeo original)
+# Replays marcados como ignorar; lance 02:25-02:35 marcado como opcional conforme anotação.
+
+# --- Ataques Maringá (verde) ---
+ataque 02:00 02:20
+ataque 02:40 02:45
+ataque 02:53 03:07
+ataque 03:25 04:00
+ataque 04:20 04:42
+ataque 05:16 05:22
+ataque 05:40 05:47   # lance de 7 metros
+ataque 06:46 07:10
+ataque 07:41 08:00
+ataque 08:24 08:42
+ataque 09:13 09:40
+ataque 10:45 11:07
+ignorar 11:10 11:15  # replay
+ataque 11:46 11:51
+ataque 12:40 12:47
+ataque 13:40 14:03
+ataque 14:24 15:09
+ataque 17:15 17:31
+ataque 18:00 18:36
+ataque 18:45 19:12
+ataque 19:54 19:58
+ataque 20:34 20:52
+ataque 21:08 21:12
+ataque 21:58 22:05
+ataque 22:27 22:40
+ataque 23:20 23:42
+ataque 23:54 23:58
+ataque 25:00 25:35
+ataque 25:52 25:58
+ataque 28:10 28:23
+ataque 28:45 29:05
+ataque 29:23 29:29
+ataque 29:39 30:14
+ataque 30:45 31:05
+ataque 31:26 31:31   # lance de 7 metros
+ataque 32:36 33:00
+ataque 33:15 33:22
+ataque 34:00 34:35
+ataque 34:54 34:59
+ataque 35:35 35:50
+ataque 41:09 41:16
+ataque 41:44 41:47
+ataque 42:38 43:32   # unificado das linhas 44-46 originais (42:47-43:32 / 42:38-42:50 / 43:06-43:19)
+ataque 43:45 44:08
+ataque 44:53 45:01
+ataque 45:26 45:44   # linhas 49 e 51 originais (45:26-45:39 e 45:38-45:44)
+ignorar 45:48 45:53  # replay
+ataque 47:27 47:38
+ataque 47:42 47:50
+ataque 48:40 48:50
+ataque 49:00 49:04
+ataque 50:30 50:42
+ataque 51:25 51:36
+ataque 52:07 52:32
+ataque 53:04 53:10
+ataque 53:19 53:23
+ataque 54:34 54:49
+ataque 54:57 55:05
+ataque 57:04 57:17
+ignorar 57:20 57:24  # replay
+ataque 58:34 59:11
+ataque 01:00:15 01:00:45
+ataque 01:00:56 01:01:00
+ataque 01:01:21 01:01:26
+ataque 01:02:42 01:03:16
+ataque 01:05:07 01:05:31
+ataque 01:05:48 01:06:20
+ataque 01:06:53 01:06:59
+ataque 01:07:33 01:08:07
+ataque 01:08:40 01:08:44
+ataque 01:10:49 01:10:53
+ataque 01:11:50 01:12:04
+ataque 01:12:35 01:12:55
+ataque 01:13:56 01:14:10
+ataque 01:15:33 01:15:50
+ataque 01:16:19 01:16:24
+ataque 01:19:05 01:19:17
+ataque 01:19:43 01:19:55
+
+# --- Ataques Cascavel (amarelo -> defesa do Maringá) ---
+defesa 02:25 02:35 opcional  # lance travou, não está errada a sugestão
+defesa 04:02 04:07
+defesa 05:00 05:10
+defesa 06:00 06:12
+defesa 07:16 07:25
+defesa 08:02 08:10
+defesa 08:45 08:54
+defesa 09:50 10:32
+defesa 11:30 11:40
+defesa 11:54 12:37
+defesa 13:02 13:18
+defesa 14:12 14:18
+defesa 15:16 15:23
+defesa 17:35 17:42
+defesa 20:14 20:22
+defesa 20:54 21:04
+defesa 21:14 21:18
+defesa 22:12 22:21
+defesa 23:48 23:52
+defesa 24:12 24:23
+defesa 24:32 24:40
+defesa 25:40 25:49
+defesa 27:37 27:55
+defesa 29:14 29:18
+defesa 30:19 30:24
+defesa 31:48 31:59
+defesa 32:20 32:24   # lance de 7 metros
+defesa 33:26 33:55
+defesa 34:46 34:51
+defesa 35:18 35:25
+defesa 35:55 36:01
+defesa 40:50 41:04
+defesa 41:28 41:38
+defesa 42:06 42:22
+defesa 44:34 44:48
+defesa 45:25 45:32
+defesa 46:00 46:08
+defesa 47:01 47:16
+defesa 48:54 48:58
+defesa 49:18 49:42
+defesa 50:10 50:15   # lance de 7 metros
+defesa 50:49 51:12
+defesa 52:40 53:00
+defesa 54:04 54:22
+ignorar 54:26 54:32  # replay
+defesa 56:18 56:29
+defesa 56:48 56:52   # lance de 7 metros
+ignorar 56:56 57:00  # replay
+defesa 57:26 57:39
+defesa 58:19 58:27   # lance de 7 metros
+defesa 59:14 59:18
+defesa 59:54 01:00:10
+defesa 01:00:47 01:00:52
+defesa 01:01:06 01:01:18
+defesa 01:02:12 01:02:36
+defesa 01:03:30 01:03:40
+defesa 01:04:22 01:04:33
+defesa 01:04:43 01:04:55
+defesa 01:05:33 01:05:38
+defesa 01:06:26 01:06:48
+defesa 01:07:04 01:07:26
+defesa 01:08:10 01:08:37
+defesa 01:10:12 01:10:42
+defesa 01:10:58 01:11:26
+defesa 01:12:05 01:12:10
+defesa 01:13:20 01:13:51
+defesa 01:16:05 01:16:17
+defesa 01:16:54 01:17:09
+defesa 01:19:30 01:19:35

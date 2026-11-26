@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import queue
 import shutil
@@ -542,9 +543,9 @@ def fmt_time(seconds: float) -> str:
     return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
 
 
-def export_log(job_id: str, text: str) -> None:
+def export_log(job_id: str, text: str, kind: str = "export") -> None:
     """Linha de diagnóstico no terminal (python app.py) e no arquivo handcut.log da pasta de dados."""
-    line = f"[export {job_id[:8]}] {text}"
+    line = f"[{kind} {job_id[:8]}] {text}"
     print(line, flush=True)
     try:
         if LOG_FILE.exists() and LOG_FILE.stat().st_size > 2_000_000:
@@ -733,6 +734,157 @@ def export():
         return jsonify(error=f"Intervalos inválidos: {exc}"), 400
     job_id = add_job("export")
     threading.Thread(target=export_worker, args=(job_id, path, normalized, margin, resolution, media_sources.get(media_id)), daemon=True).start()
+    return jsonify(job_id=job_id), 202
+
+
+def normalize_analysis_periods(value: object, duration: float) -> list[dict[str, float]]:
+    """Valida e junta períodos de análise sobrepostos.
+
+    Uma lista vazia mantém o comportamento anterior: analisar o vídeo inteiro. Os períodos são
+    normalizados no servidor para impedir trabalho duplicado e para nunca deixar o detector sair
+    da faixa que a pessoa delimitou.
+    """
+    if value is None or value == []:
+        return [{"start": 0.0, "end": duration}]
+    if not isinstance(value, list):
+        raise ValueError("Os períodos de análise precisam ser uma lista.")
+    periods: list[tuple[float, float]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("Um dos períodos de análise é inválido.")
+        try:
+            start, end = float(item["start"]), float(item["end"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Um dos períodos de análise é inválido.") from exc
+        if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start or start >= duration:
+            raise ValueError("Um dos períodos de análise é inválido.")
+        periods.append((start, min(end, duration)))
+    periods.sort()
+    merged: list[list[float]] = []
+    for start, end in periods:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [{"start": start, "end": end} for start, end in merged]
+
+
+ALLOWED_SHIRTS = {"clara", "escura", "amarela", "vermelha", "azul", "verde"}
+
+
+def normalize_shirt_colors(value: object) -> list[tuple[int, int, int]]:
+    """Valida as amostras RGB opcionalmente clicadas na camisa dos jogadores."""
+    if value is None or value == []:
+        return []
+    if not isinstance(value, list) or len(value) > 10:
+        raise ValueError("As amostras de cor precisam ser uma lista com até 10 cliques.")
+    colors: list[tuple[int, int, int]] = []
+    for item in value:
+        if not isinstance(item, (list, tuple)) or len(item) != 3:
+            raise ValueError("Cada amostra de cor deve ter 3 valores RGB.")
+        rgb = tuple(int(round(float(channel))) for channel in item)
+        if any(channel < 0 or channel > 255 for channel in rgb):
+            raise ValueError("Cada canal RGB precisa ficar entre 0 e 255.")
+        colors.append(rgb)  # type: ignore[arg-type]
+    return colors
+
+
+def suggest_worker(job_id: str, media_path: Path, shirt: str,
+                   periods: list[dict[str, float]],
+                   shirt_colors: list[tuple[int, int, int]] | None = None) -> None:
+    """Acha ataques e defesas somente nos períodos escolhidos e devolve intervalos sugeridos."""
+    try:
+        # Importado só aqui: o YOLO (onnxruntime) só é carregado quando a pessoa pede a sugestão.
+        import detector
+
+        info = probe(media_path)
+        started = time.perf_counter()
+        selected_duration = sum(period["end"] - period["start"] for period in periods)
+        color_desc = (f"{len(shirt_colors)} clique(s) no vídeo" if shirt_colors else f"camisa {shirt}")
+        export_log(job_id, f"analisando {media_path.name} ({len(periods)} período(s), "
+                           f"{fmt_time(selected_duration)} de {fmt_time(info['duration'])}), {color_desc}", "sugestão")
+
+        person_detector = detector.PersonDetector()
+        period_samples: list[tuple[float, list[dict]]] = []
+        completed_seconds = 0.0
+        for number, period in enumerate(periods, 1):
+            section_duration = period["end"] - period["start"]
+
+            def progress(fraction: float, *, before: float = completed_seconds,
+                         section: float = section_duration) -> None:
+                total_fraction = (before + fraction * section) / max(selected_duration, 1.0)
+                finish_job(job_id, message=f"Analisando período {number}/{len(periods)}… {total_fraction:.0%}",
+                           progress=round(total_fraction * 100))
+
+            samples = detector.extract_samples(
+                media_path, info["duration"], info["width"], info["height"], start=period["start"],
+                end=period["end"], progress=progress, detector=person_detector,
+            )
+            period_samples.append((period["end"], samples))
+            completed_seconds += section_duration
+            progress(1.0)
+
+        sample_count = sum(len(samples) for _, samples in period_samples)
+        if not sample_count:
+            raise ValueError("Não consegui ler imagens desse vídeo para analisar.")
+        mine_lab = [detector.rgb_to_lab(rgb) for rgb in shirt_colors] if shirt_colors else None
+        diagnostics: dict = {}
+        suggestions = detector.suggest_periods(
+            period_samples, shirt=shirt, mine_colors=mine_lab, diagnostics_out=diagnostics
+        )
+        warnings = diagnostics.get("warnings", [])
+        elapsed = time.perf_counter() - started
+        export_log(
+            job_id,
+            f"{sample_count} quadros em {elapsed:.0f}s | {diagnostics.get('obs_count', 0)} obs. "
+            f"({diagnostics.get('proto_mode', '?')}) | "
+            f"{len(suggestions['ataque'])} ataque(s), {len(suggestions['defesa'])} defesa(s)",
+            "sugestão",
+        )
+        for warning in warnings:
+            export_log(job_id, f"aviso: {warning}", "sugestão")
+        summary_msg = (
+            f"Análise pronta: {len(suggestions['ataque'])} ataque(s) e "
+            f"{len(suggestions['defesa'])} defesa(s) encontrados."
+        )
+        if warnings:
+            summary_msg += " Aviso: " + " ".join(warnings)
+        finish_job(
+            job_id, status="done", progress=100, suggestions=suggestions,
+            warnings=warnings, diagnostics=diagnostics, message=summary_msg,
+        )
+    except ImportError as exc:
+        export_log(job_id, f"falta uma biblioteca: {exc}", "sugestão")
+        finish_job(job_id, status="error", detail=str(exc),
+                   message="A sugestão automática precisa do onnxruntime e do OpenCV. "
+                           "Instale com: python -m pip install -r requirements.txt")
+    except Exception as exc:
+        export_log(job_id, f"erro: {exc}", "sugestão")
+        finish_job(job_id, status="error", message=str(exc))
+
+
+@app.post("/api/suggest")
+def suggest_plays():
+    data = request.json or {}
+    path = active_media.get(data.get("media_id"))
+    if not path or not path.exists():
+        return jsonify(error="Carregue um vídeo antes de pedir a sugestão."), 400
+    shirt = str(data.get("shirt", "clara")).lower()
+    if shirt not in ALLOWED_SHIRTS:
+        return jsonify(error="Informe a cor da camisa do seu time."), 400
+    try:
+        shirt_colors = normalize_shirt_colors(data.get("shirt_colors"))
+        periods = normalize_analysis_periods(data.get("periods"), probe(path)["duration"])
+    except (TypeError, ValueError) as exc:
+        return jsonify(error=str(exc)), 400
+    with jobs_lock:
+        busy = any(job["kind"] == "suggest" and job["status"] == "processing" for job in jobs.values())
+    if busy:  # duas análises ao mesmo tempo disputariam a CPU e as duas ficariam lentas
+        return jsonify(error="Já existe uma análise em andamento. Espere ela terminar."), 409
+    job_id = add_job("suggest")
+    threading.Thread(
+        target=suggest_worker, args=(job_id, path, shirt, periods, shirt_colors), daemon=True
+    ).start()
     return jsonify(job_id=job_id), 202
 
 
