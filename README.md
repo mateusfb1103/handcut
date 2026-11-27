@@ -53,7 +53,7 @@ Os intervalos são exportados na ordem do jogo. A margem padrão adiciona 3 segu
 
 ## Sugestão automática de lances (Fase 2)
 
-> **Estado atual:** modelo `YOLOX-s` (`Apache-2.0`) congelado e histórico Git higienizado (`3A/3B/3B.5` concluídas). A detecção está aprovada nos jogos de quadra padrão (`Londrina-X-Cascavel`, `Final4` e `Pato x Cascavel`) e segue em ajuste fino apenas para quadras bicolores com rede na frente da câmera (`Londrina x Pato`, Plano B `1A-v2`).
+> **Estado atual:** modelo `YOLOX-s` (`Apache-2.0`) congelado, histórico Git higienizado (`3A/3B/3B.5`) e **Plano B (`1A-v2`)** concluído — todos os 4 jogos oficiais da matriz (`Londrina-X-Cascavel`, `Final4`, `Pato x Cascavel` e `Londrina x Pato`, incluindo quadra bicolor com rede na câmera) atingiram **100% PASSA** na validação.
 
 Com um vídeo aberto, o bloco "Sugestão automática" analisa o jogo e adiciona à lista os trechos de ataque ou de defesa do seu time (marcados como "sugerido"). Você revisa, ajusta início e fim de lances pontuais no ícone de lápis ou remove o que estiver errado no `X`, e exporta como de costume.
 

@@ -69,7 +69,7 @@ Marque cada ação ao concluir; a etapa seguinte começa quando o critério da a
 
 > **Status de licença (resolvido em 26/11/2026):** `models/yolo11n.onnx` (`AGPL-3.0`) foi substituído por `models/yolox_s.onnx` (`Apache-2.0`, acompanhado de `models/LICENSE-YOLOX.txt` e `models/NOTICE`) e removido completamente do histórico Git (`3B.5`). `build.py` já empacota o modelo permissivo e os arquivos de atribuição obrigatórios.
 
-- [ ] Concluir o protocolo da Fase 2 em [Protocolo de Testes Fase 2.md](./Protocolo%20de%20Testes%20Fase%202.md) (pendente apenas o Plano B `1A-v2` para quadras bicolores com rede, como `Londrina x Pato.mp4`).
+- [x] Concluir o protocolo da Fase 2 em [Protocolo de Testes Fase 2.md](./Protocolo%20de%20Testes%20Fase%202.md) (100% PASSA nos 4 jogos oficiais com `YOLOX-s` `Apache-2.0` + Plano B `1A-v2` em 26/11/2026).
 - [x] Decidir licença e modelo (`YOLOX-s` `Apache-2.0` congelado no Passo 3A/3B e histórico Git higienizado no Passo 3B.5).
 - [ ] Implementar salvamento de marcações (Fase 1) e concluir a Etapa C para fechar o ciclo de testes com usuários.
 - [ ] Fazer a versão para Mac (empacotamento, assinatura e notarização da Apple).
