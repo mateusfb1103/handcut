@@ -212,6 +212,68 @@ class DetectorTimeAndEdgesTests(unittest.TestCase):
             [{"start": 0.0, "end": 5.0}, {"start": 11.0, "end": 16.0}],
         )
 
+    def test_floor_history_guard_blocks_chromatic_jump_and_allows_gradual_drift(self):
+        hist = deque(maxlen=30)
+        cyan = np.array([207.0, 110.0, 106.0], dtype=np.float32)
+        for _ in range(12):
+            ref = detector._update_floor_history(hist, cyan)
+        self.assertAlmostEqual(float(ref[1]), 110.0, places=1)
+        # Salto cromático brusco (ex.: retângulo cinza de vôlei no centro, delta_ab ~ 26 > 15) é rejeitado
+        gray = np.array([190.0, 125.0, 128.0], dtype=np.float32)
+        for _ in range(15):
+            ref = detector._update_floor_history(hist, gray)
+        self.assertAlmostEqual(float(ref[1]), 110.0, places=1)
+        self.assertAlmostEqual(float(ref[2]), 106.0, places=1)
+        # Deriva gradual de iluminação/exposição (delta_ab <= 15) continua sendo aceita normalmente
+        warm_cyan = np.array([195.0, 114.0, 112.0], dtype=np.float32)
+        for _ in range(25):
+            ref = detector._update_floor_history(hist, warm_cyan)
+        self.assertGreater(float(ref[1]), 112.0)
+
+    def test_camera_pan_estimator_detects_horizontal_shift_and_resets_on_cut(self):
+        rng = np.random.default_rng(42)
+        base = rng.integers(30, 225, size=(180, 320, 3), dtype=np.uint8)
+        # Cena desloca para a esquerda (roll -12 px) -> câmera girou para a direita (pan_dx > 0)
+        panned_right = np.roll(base, -12, axis=1)
+        dx0, cut0, g0 = detector._estimate_camera_pan(None, base)
+        self.assertEqual(dx0, 0.0)
+        self.assertFalse(cut0)
+        dx1, cut1, _ = detector._estimate_camera_pan(g0, panned_right)
+        self.assertFalse(cut1)
+        self.assertGreater(dx1, 2.0)
+
+        # Integração acumula o pan e zera em corte de cena (`pan_cut=True`)
+        integrated = detector._integrate_pan_positions([
+            {"pan_dx": 10.0, "pan_cut": False},
+            {"pan_dx": 10.0, "pan_cut": False},
+            {"pan_dx": 0.0, "pan_cut": True},
+            {"pan_dx": -8.0, "pan_cut": False},
+        ])
+        self.assertGreater(integrated[1], 15.0)
+        self.assertEqual(integrated[2], 0.0)
+        self.assertLess(integrated[3], -5.0)
+
+    def test_bicolor_inverted_court_stabilizes_goal_side_and_preserves_low_cov_play(self):
+        # Quadra bicolor invertida: corr(cov_diff, end_score) < -0.25.
+        # Inclui um lance no gol direito com cov_diff quase nulo (0.02), mas jogadores à direita (0.68) e pan > 0.
+        left_block = [
+            {"t": i * 0.5, "people": [(0.34, 0.6, 30.0)] * 4, "cov_diff": 0.32, "end_score": -0.75, "pan_dx": -5.0, "pan_cut": False}
+            for i in range(10)
+        ]
+        right_low_cov = [
+            {"t": (10 + i) * 0.5, "people": [(0.68, 0.6, 30.0)] * 4, "cov_diff": 0.02, "end_score": 0.70, "pan_dx": 12.0, "pan_cut": False}
+            for i in range(12)
+        ]
+        samples = left_block + right_low_cov
+        self.assertTrue(detector._is_inverted_painted_court(samples))
+        sides = detector.goal_sides(samples)
+        self.assertEqual(sides[3], 0.0)
+        self.assertEqual(sides[-3], 1.0)
+        # Mesmo com |cov_diff|=0.02 no lance direito, labels_to_segments não deve descartá-lo em quadra invertida
+        labels = [detector.DEFESA] * 10 + [detector.ATAQUE] * 12
+        segs = detector.labels_to_segments(samples, labels, detector.ATAQUE)
+        self.assertEqual(segs, [{"start": 5.0, "end": 11.0}])
+
 
 class TeamColorSeparationTests(unittest.TestCase):
     def test_separates_same_luminance_yellow_vs_red_and_black_vs_blue_in_lab(self):
