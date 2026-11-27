@@ -9,6 +9,7 @@ ffmpeg, ffprobe, deno e yt-dlp (no Windows, com ".exe").
 """
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -39,7 +40,15 @@ def check_vendor() -> None:
         sys.exit(f"Faltam arquivos em {vendor}:\n  " + "\n  ".join(missing))
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Empacota o Handcut com PyInstaller.")
+    parser.add_argument(
+        "--no-zip",
+        action="store_true",
+        help="Gera apenas dist/Handcut/ sem criar dist/Handcut.zip (útil quando só o instalador será gerado).",
+    )
+    args = parser.parse_args(argv)
+
     check_vendor()
     for folder in ("build", "dist"):
         shutil.rmtree(ROOT / folder, ignore_errors=True)
@@ -61,6 +70,9 @@ def main() -> None:
         str(ROOT / "launcher.py"),
     ]
     subprocess.run(command, cwd=ROOT, check=True)
+    if args.no_zip:
+        print(f"\nPronto:\n  pasta: {ROOT / 'dist' / APP_NAME}")
+        return
     archive = shutil.make_archive(str(ROOT / "dist" / APP_NAME), "zip", ROOT / "dist", APP_NAME)
     size = Path(archive).stat().st_size / 1024 / 1024
     print(f"\nPronto:\n  pasta: {ROOT / 'dist' / APP_NAME}\n  ZIP:   {archive} ({size:.0f} MB)")

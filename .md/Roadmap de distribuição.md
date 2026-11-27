@@ -53,14 +53,14 @@ Marque cada ação ao concluir; a etapa seguinte começa quando o critério da a
 - [X] Escrever um guia curto de instalação e uso, com o aviso do SmartScreen ("Mais informações → Executar assim mesmo").
 - [X] Avisar os testadores de que a velocidade depende do computador de cada um.
 - [X] Escolher testadores com computadores diferentes.
-- [ ] Registrar, por teste, o tempo de exportação, os erros e as dúvidas.
-- [ ] Atualizar riscos e decisões do documento com o que os testes mostrarem.
+- [X] Registrar, por teste, o tempo de exportação, os erros e as dúvidas.
+- [X] Atualizar riscos e decisões do documento com o que os testes mostrarem.
 
 ### D · Instalador e estabilidade
 
 - [ ] Ler as condições de redistribuição do FFmpeg (GPL) e do Deno e registrar as atribuições no pacote.
-- [ ] Criar o instalador com o Inno Setup.
-- [ ] Gerar o instalador automaticamente com o GitHub Actions.
+- [X] Criar o instalador com o Inno Setup (`installer/handcut-installer.iss`).
+- [X] Gerar o instalador automaticamente com o GitHub Actions (`.github/workflows/release-windows.yml` por tag `v*` ou execução manual + `.github/workflows/ci.yml` para testes).
 - [ ] Avaliar a assinatura digital do instalador (custo) para evitar o aviso do SmartScreen.
 - [ ] Definir como o app avisa que há uma versão nova.
 - [ ] Revisar os termos de uso do download de vídeos e fechar a decisão "Uso dos vídeos baixados".

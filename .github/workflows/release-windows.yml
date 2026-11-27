@@ -1,0 +1,139 @@
+name: Release Windows (Instalador)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão do instalador (ex.: 1.2.0)"
+        required: true
+        default: "1.1.0-test"
+      include_zip:
+        description: "Também gerar e anexar o Handcut.zip portátil"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-installer:
+    name: Build e Instalador Windows
+    runs-on: windows-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Definir versão da build
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $raw = "${{ inputs.version }}"
+          } else {
+            $raw = "${{ github.ref_name }}"
+          }
+          $clean = $raw.Trim() -replace '^v', ''
+          if ([string]::IsNullOrWhiteSpace($clean) -or $clean -match '[^0-9A-Za-z._-]') {
+            throw "Versão inválida: '$raw'"
+          }
+          "app_version=$clean" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Versão selecionada: $clean"
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Instalar dependências de build
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Executar testes unitários
+        run: python -m unittest discover -s tests -v
+
+      - name: Cache de binários em vendor/
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: vendor-win64-v1-${{ hashFiles('tools/download_vendor.py') }}
+
+      - name: Baixar binários em vendor/ (atualizando yt-dlp)
+        run: python tools/download_vendor.py --update-ytdlp
+
+      - name: Empacotar executável (PyInstaller)
+        shell: pwsh
+        run: |
+          if ("${{ inputs.include_zip }}" -eq "true") {
+            python build.py
+          } else {
+            python build.py --no-zip
+          }
+
+      - name: Compilar instalador (Inno Setup)
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+        run: |
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+          if (-not $iscc) {
+            $defaultPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+            if (Test-Path $defaultPath) {
+              $iscc = $defaultPath
+            }
+          }
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "ISCC.exe (Inno Setup) não encontrado."
+          }
+          & $iscc "/DMyAppVersion=$env:APP_VERSION" "installer\handcut-installer.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao compilar o instalador com ISCC.exe (exit code $LASTEXITCODE)."
+          }
+
+      - name: Gerar checksums SHA-256
+        shell: pwsh
+        run: |
+          $targets = @(Get-ChildItem -Path "dist\installer\Handcut-Setup-*.exe")
+          if (Test-Path "dist\Handcut.zip") {
+            $targets += Get-Item "dist\Handcut.zip"
+          }
+          $lines = foreach ($file in $targets) {
+            $hash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($file.Name)"
+          }
+          $lines | Out-File -FilePath "dist\installer\SHA256SUMS.txt" -Encoding ascii
+          Get-Content "dist\installer\SHA256SUMS.txt"
+
+      - name: Anexar artefatos da execução
+        uses: actions/upload-artifact@v4
+        with:
+          name: handcut-windows-${{ steps.version.outputs.app_version }}
+          path: |
+            dist/installer/Handcut-Setup-*.exe
+            dist/installer/SHA256SUMS.txt
+            dist/Handcut.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publicar GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Handcut v${{ steps.version.outputs.app_version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/installer/Handcut-Setup-*.exe
+            dist/installer/SHA256SUMS.txt
