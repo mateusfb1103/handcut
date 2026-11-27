@@ -10,6 +10,10 @@ on:
         description: "Versão do instalador (ex.: 1.2.0)"
         required: true
         default: "1.1.0-test"
+      publish_release:
+        description: "Publicar GitHub Release (cria a tag v<versão>)"
+        type: boolean
+        default: false
       include_zip:
         description: "Também gerar e anexar o Handcut.zip portátil"
         type: boolean
@@ -102,12 +106,17 @@ jobs:
             throw "Falha ao compilar o instalador com ISCC.exe (exit code $LASTEXITCODE)."
           }
 
-      - name: Gerar checksums SHA-256
+      - name: Preparar arquivos e checksums SHA-256
         shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
         run: |
-          $targets = @(Get-ChildItem -Path "dist\installer\Handcut-Setup-*.exe")
           if (Test-Path "dist\Handcut.zip") {
-            $targets += Get-Item "dist\Handcut.zip"
+            Copy-Item "dist\Handcut.zip" "dist\installer\Handcut-$env:APP_VERSION-win64.zip"
+          }
+          $targets = @(Get-ChildItem -Path "dist\installer\*" -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" })
+          if ($targets.Count -eq 0) {
+            throw "Nenhum artefato encontrado em dist\installer."
           }
           $lines = foreach ($file in $targets) {
             $hash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -120,20 +129,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: handcut-windows-${{ steps.version.outputs.app_version }}
-          path: |
-            dist/installer/Handcut-Setup-*.exe
-            dist/installer/SHA256SUMS.txt
-            dist/Handcut.zip
+          path: dist/installer/*
           if-no-files-found: error
           retention-days: 30
 
       - name: Publicar GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.app_version }}
+          target_commitish: ${{ github.sha }}
           name: Handcut v${{ steps.version.outputs.app_version }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: |
-            dist/installer/Handcut-Setup-*.exe
-            dist/installer/SHA256SUMS.txt
+          files: dist/installer/*
